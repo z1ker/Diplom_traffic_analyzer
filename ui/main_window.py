@@ -6,565 +6,341 @@ from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableWidget, QTableWidgetItem,
     QTextEdit, QLabel, QLineEdit, QFrame, QStackedWidget,
-    QHeaderView, QSizePolicy, QScrollArea, QComboBox,
-    QProgressBar, QFileDialog
+    QHeaderView, QScrollArea, QComboBox, QFileDialog, QMessageBox
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject, QThread
-from PyQt5.QtGui import QFont, QColor, QPalette, QIcon
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject
+from PyQt5.QtGui import QFont, QColor
 
-from capture.packet_capture import PacketCapture
+from capture.packet_capture import PacketCapture, FILTER_PRESETS
 from analysis.traffic_analyzer import TrafficAnalyzer
 from analysis.anomaly_detector import AnomalyDetector
 from storage.data_export import DataExporter
 from visualization.charts import plot_top_ips, plot_top_ports, plot_protocol_pie, plot_traffic_timeline
 
 
-# ─────────────────────────────────────────────
-#  Signal bridge (cross-thread UI updates)
-# ─────────────────────────────────────────────
+# ── Signal bridge (safe cross-thread UI updates) ─────────────
 class SignalBridge(QObject):
     packet_received = pyqtSignal(dict)
     alert_received  = pyqtSignal(str)
 
 
-# ─────────────────────────────────────────────
-#  Reusable styled widgets
-# ─────────────────────────────────────────────
-def _label(text, size=13, bold=False, color="#c9d1d9"):
-    lbl = QLabel(text)
-    font = QFont("Consolas", size)
-    font.setBold(bold)
-    lbl.setFont(font)
-    lbl.setStyleSheet(f"color: {color}; background: transparent;")
-    return lbl
+# ── Font constants ───────────────────────────────────────────
+UI_FONT   = "Segoe UI"      # labels, buttons, nav, cards
+DATA_FONT = "Consolas"      # IPs, ports, packet inspector, export log
 
 
-def _separator():
-    line = QFrame()
-    line.setFrameShape(QFrame.HLine)
-    line.setStyleSheet("color: #30363d;")
-    return line
+# ── Helper widgets ───────────────────────────────────────────
+def _lbl(text, size=11, bold=False, color="#c9d1d9"):
+    w = QLabel(text)
+    f = QFont(UI_FONT, size)
+    f.setBold(bold)
+    w.setFont(f)
+    w.setStyleSheet(f"color:{color};background:transparent;")
+    return w
+
+
+def _sep():
+    l = QFrame(); l.setFrameShape(QFrame.HLine)
+    l.setStyleSheet("color:#30363d;"); return l
 
 
 class StatCard(QFrame):
-    """Small metric card for the dashboard strip."""
-
-    def __init__(self, title: str, value: str = "0", accent: str = "#00ff88"):
+    def __init__(self, title, value="0", accent="#00ff88"):
         super().__init__()
         self._accent = accent
-        self.setFixedHeight(88)
+        self.setFixedHeight(86)
         self.setStyleSheet(f"""
-            QFrame {{
-                background: #161b22;
-                border: 1px solid #30363d;
-                border-top: 3px solid {accent};
-                border-radius: 6px;
-            }}
-        """)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 10, 14, 10)
-        layout.setSpacing(4)
+            QFrame{{background:#161b22;border:1px solid #30363d;
+                    border-top:3px solid {accent};border-radius:6px;}}""")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(12, 8, 12, 8); lay.setSpacing(3)
+        self.val = _lbl(value, 20, True, accent)
+        self.ttl = QLabel(title)
+        self.ttl.setFont(QFont(UI_FONT, 9))
+        self.ttl.setStyleSheet("color:#8b949e;background:transparent;letter-spacing:1px;")
+        lay.addWidget(self.val)
+        lay.addWidget(self.ttl)
 
-        self.value_lbl = _label(value, size=22, bold=True, color=accent)
-        self.title_lbl = _label(title, size=9, color="#8b949e")
-        layout.addWidget(self.value_lbl)
-        layout.addWidget(self.title_lbl)
-
-    def update_value(self, val: str):
-        self.value_lbl.setText(val)
+    def set(self, v): self.val.setText(str(v))
 
 
-class NavButton(QPushButton):
-    """Sidebar navigation button."""
-
-    def __init__(self, text: str, icon_char: str = "▶"):
-        super().__init__(f"  {icon_char}  {text}")
+class NavBtn(QPushButton):
+    def __init__(self, icon, text):
+        super().__init__(f"  {icon}  {text}")
         self.setCheckable(True)
-        self.setFont(QFont("Consolas", 10))
-        self.setFixedHeight(42)
+        self.setFont(QFont(UI_FONT, 10))
+        self.setFixedHeight(40)
         self.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: #8b949e;
-                border: none;
-                text-align: left;
-                padding-left: 12px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background: #21262d;
-                color: #c9d1d9;
-            }
-            QPushButton:checked {
-                background: #0d1117;
-                color: #00ff88;
-                border-left: 3px solid #00ff88;
-            }
-        """)
+            QPushButton{background:transparent;color:#8b949e;border:none;
+                        text-align:left;padding-left:10px;border-radius:4px;}
+            QPushButton:hover{background:#21262d;color:#c9d1d9;}
+            QPushButton:checked{background:#0d1117;color:#00ff88;
+                                border-left:3px solid #00ff88;}""")
 
 
-class AlertRow(QFrame):
-    """Single alert entry in the alert log."""
-
-    COLORS = {
-        "⚠": "#ffa500",
-        "🔴": "#ff4444",
-        "ℹ": "#4d9eff",
-    }
-
-    def __init__(self, message: str):
-        super().__init__()
-        icon = message[0] if message[0] in self.COLORS else "⚠"
-        color = self.COLORS.get(icon, "#ffa500")
-        ts = datetime.now().strftime("%H:%M:%S")
-
-        self.setStyleSheet(f"""
-            QFrame {{
-                background: #161b22;
-                border-left: 3px solid {color};
-                border-radius: 3px;
-                margin: 2px 0;
-            }}
-        """)
-        row = QHBoxLayout(self)
-        row.setContentsMargins(10, 6, 10, 6)
-
-        row.addWidget(_label(ts, size=9, color="#8b949e"))
-        row.addWidget(_label(message, size=9, color=color), stretch=1)
-
-
-# ─────────────────────────────────────────────
-#  Main Window
-# ─────────────────────────────────────────────
+# ── Main Window ──────────────────────────────────────────────
 class MainWindow(QMainWindow):
 
-    BASE_STYLE = """
-        QMainWindow, QWidget {
-            background-color: #0d1117;
-            color: #c9d1d9;
-            font-family: Consolas, 'Courier New', monospace;
-        }
-        QTableWidget {
-            background-color: #161b22;
-            alternate-background-color: #1c2128;
-            color: #c9d1d9;
-            gridline-color: #30363d;
-            border: 1px solid #30363d;
-            border-radius: 6px;
-            selection-background-color: #1f6feb33;
-            selection-color: #4d9eff;
-        }
-        QHeaderView::section {
-            background-color: #21262d;
-            color: #8b949e;
-            border: none;
-            border-bottom: 1px solid #30363d;
-            padding: 6px 10px;
-            font-size: 10px;
-            letter-spacing: 1px;
-            text-transform: uppercase;
-        }
-        QScrollBar:vertical {
-            background: #161b22;
-            width: 8px;
-            border-radius: 4px;
-        }
-        QScrollBar::handle:vertical {
-            background: #30363d;
-            border-radius: 4px;
-        }
-        QScrollBar::handle:vertical:hover {
-            background: #4d9eff;
-        }
-        QScrollBar:horizontal { height: 8px; background: #161b22; }
-        QScrollBar::handle:horizontal { background: #30363d; border-radius: 4px; }
-        QTextEdit {
-            background-color: #161b22;
-            color: #7ee787;
-            border: 1px solid #30363d;
-            border-radius: 6px;
-            padding: 8px;
-        }
-        QLineEdit {
-            background-color: #161b22;
-            color: #c9d1d9;
-            border: 1px solid #30363d;
-            border-radius: 5px;
-            padding: 6px 10px;
-        }
-        QLineEdit:focus {
-            border: 1px solid #4d9eff;
-        }
-        QComboBox {
-            background-color: #161b22;
-            color: #c9d1d9;
-            border: 1px solid #30363d;
-            border-radius: 5px;
-            padding: 5px 10px;
-        }
-        QComboBox::drop-down { border: none; }
-        QComboBox QAbstractItemView {
-            background: #161b22;
-            color: #c9d1d9;
-            selection-background-color: #1f6feb;
-        }
-        QToolTip {
-            background: #21262d;
-            color: #c9d1d9;
-            border: 1px solid #30363d;
-            padding: 4px 8px;
-        }
+    STYLE = """
+    QMainWindow,QWidget{background:#0d1117;color:#c9d1d9;
+                        font-family:'Segoe UI',Arial,sans-serif;font-size:11px;}
+    QTableWidget{background:#161b22;alternate-background-color:#1c2128;
+                 color:#c9d1d9;gridline-color:#30363d;border:1px solid #30363d;
+                 border-radius:5px;selection-background-color:#1f6feb33;
+                 selection-color:#4d9eff;}
+    QHeaderView::section{background:#21262d;color:#8b949e;border:none;
+                         border-bottom:1px solid #30363d;padding:5px 10px;
+                         font-family:'Segoe UI';font-size:10px;letter-spacing:1px;}
+    QScrollBar:vertical{background:#161b22;width:7px;border-radius:3px;}
+    QScrollBar::handle:vertical{background:#30363d;border-radius:3px;}
+    QScrollBar::handle:vertical:hover{background:#4d9eff;}
+    QScrollBar:horizontal{background:#161b22;height:7px;}
+    QScrollBar::handle:horizontal{background:#30363d;border-radius:3px;}
+    QTextEdit{background:#161b22;color:#7ee787;border:1px solid #30363d;
+              border-radius:5px;padding:6px;font-family:Consolas;}
+    QLineEdit{background:#161b22;color:#c9d1d9;border:1px solid #30363d;
+              border-radius:4px;padding:5px 10px;font-family:'Segoe UI';}
+    QLineEdit:focus{border:1px solid #4d9eff;}
+    QComboBox{background:#161b22;color:#c9d1d9;border:1px solid #30363d;
+              border-radius:4px;padding:4px 10px;font-family:'Segoe UI';}
+    QComboBox::drop-down{border:none;}
+    QComboBox QAbstractItemView{background:#161b22;color:#c9d1d9;
+                                selection-background-color:#1f6feb;
+                                font-family:'Segoe UI';}
     """
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle("NetSentinel  ·  Traffic Analyzer")
-        self.resize(1400, 860)
-        self.setMinimumSize(1100, 680)
-        self.setStyleSheet(self.BASE_STYLE)
+        self.resize(1380, 840)
+        self.setMinimumSize(1080, 660)
+        self.setStyleSheet(self.STYLE)
 
-        self.packets   = []
-        self.alerts    = []
-        self._start_ts = None
-        self._bytes    = 0
+        self.packets    = []
+        self.alerts     = []
+        self._start_ts  = None
+        self._bytes     = 0
+        self._pkt_last  = 0
+        self._pkt_t     = time.time()
 
         self.analyzer = TrafficAnalyzer()
         self.detector = AnomalyDetector()
-        self.capture  = PacketCapture(self._on_packet_raw)
+        self.capture  = PacketCapture(self._raw_callback)
 
         self.bridge = SignalBridge()
-        self.bridge.packet_received.connect(self._on_packet_ui)
-        self.bridge.alert_received.connect(self._on_alert_ui)
+        self.bridge.packet_received.connect(self._on_packet)
+        self.bridge.alert_received.connect(self._on_alert)
 
         self._build_ui()
 
-        # Live clock / bandwidth timer
-        self._timer = QTimer()
-        self._timer.setInterval(1000)
-        self._timer.timeout.connect(self._tick)
-        self._timer.start()
+        self._clock = QTimer()
+        self._clock.timeout.connect(self._tick)
+        self._clock.start(1000)
 
-    # ──────────────────────────────────────────
-    #  UI construction
-    # ──────────────────────────────────────────
+    # ── UI ───────────────────────────────────────────────────
     def _build_ui(self):
         root = QWidget()
-        root_layout = QHBoxLayout(root)
-        root_layout.setContentsMargins(0, 0, 0, 0)
-        root_layout.setSpacing(0)
+        rl = QHBoxLayout(root)
+        rl.setContentsMargins(0, 0, 0, 0); rl.setSpacing(0)
         self.setCentralWidget(root)
 
-        root_layout.addWidget(self._build_sidebar())
+        rl.addWidget(self._sidebar())
 
-        # Main area
-        main_area = QWidget()
-        main_area.setStyleSheet("background: #0d1117;")
-        main_layout = QVBoxLayout(main_area)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
-
-        main_layout.addWidget(self._build_topbar())
-        main_layout.addWidget(self._build_stat_strip())
-
+        main = QWidget()
+        main.setStyleSheet("background:#0d1117;")
+        ml = QVBoxLayout(main)
+        ml.setContentsMargins(0, 0, 0, 0); ml.setSpacing(0)
+        ml.addWidget(self._topbar())
+        ml.addWidget(self._statstrip())
         self.stack = QStackedWidget()
-        self.stack.addWidget(self._build_capture_page())   # 0
-        self.stack.addWidget(self._build_analysis_page())  # 1
-        self.stack.addWidget(self._build_alerts_page())    # 2
-        self.stack.addWidget(self._build_export_page())    # 3
-        main_layout.addWidget(self.stack, stretch=1)
+        self.stack.addWidget(self._page_capture())   # 0
+        self.stack.addWidget(self._page_analysis())  # 1
+        self.stack.addWidget(self._page_alerts())    # 2
+        self.stack.addWidget(self._page_export())    # 3
+        ml.addWidget(self.stack, 1)
+        ml.addWidget(self._statusbar())
+        rl.addWidget(main, 1)
 
-        main_layout.addWidget(self._build_statusbar())
+    # sidebar
+    def _sidebar(self):
+        sb = QFrame()
+        sb.setFixedWidth(200)
+        sb.setStyleSheet("QFrame{background:#010409;border-right:1px solid #21262d;}")
+        l = QVBoxLayout(sb)
+        l.setContentsMargins(10, 18, 10, 18); l.setSpacing(4)
 
-        root_layout.addWidget(main_area, stretch=1)
-
-    # ── Sidebar ──────────────────────────────
-    def _build_sidebar(self):
-        sidebar = QFrame()
-        sidebar.setFixedWidth(210)
-        sidebar.setStyleSheet("""
-            QFrame {
-                background: #010409;
-                border-right: 1px solid #21262d;
-            }
-        """)
-        layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(10, 20, 10, 20)
-        layout.setSpacing(4)
-
-        # Logo
-        logo = _label("⬡ NetSentinel", size=13, bold=True, color="#00ff88")
+        logo = _lbl("⬡  NetSentinel", 12, True, "#00ff88")
         logo.setAlignment(Qt.AlignCenter)
-        logo.setStyleSheet("color: #00ff88; background: transparent; letter-spacing: 2px;")
-        layout.addWidget(logo)
-        layout.addWidget(_label("v1.0  ·  Traffic Analyzer", size=8, color="#3d444d"))
-        layout.addSpacing(20)
-        layout.addWidget(_separator())
-        layout.addSpacing(10)
+        logo.setStyleSheet("color:#00ff88;background:transparent;letter-spacing:2px;")
+        l.addWidget(logo)
+        l.addWidget(_lbl("Traffic Analyzer  v1.0", 8, False, "#3d444d"))
+        l.addSpacing(16); l.addWidget(_sep()); l.addSpacing(8)
 
-        self._nav_btns = []
-        pages = [
-            ("Capture",  "◉", 0),
-            ("Analysis", "◈", 1),
-            ("Alerts",   "⚑", 2),
-            ("Export",   "⤓", 3),
-        ]
-        for name, icon, idx in pages:
-            btn = NavButton(name, icon)
-            btn.clicked.connect(lambda _, i=idx: self._nav(i))
-            self._nav_btns.append(btn)
-            layout.addWidget(btn)
+        self._navs = []
+        for icon, text, idx in [("◉","Capture",0),("◈","Analysis",1),
+                                  ("⚑","Alerts",2),("⤓","Export",3)]:
+            b = NavBtn(icon, text)
+            b.clicked.connect(lambda _, i=idx: self._nav(i))
+            self._navs.append(b); l.addWidget(b)
 
-        self._nav_btns[0].setChecked(True)
-        layout.addStretch()
+        self._navs[0].setChecked(True)
+        l.addStretch()
+        l.addWidget(_sep())
+        self._clock_lbl = _lbl("--:--:--", 9, False, "#3d444d")
+        self._clock_lbl.setAlignment(Qt.AlignCenter)
+        l.addWidget(self._clock_lbl)
+        return sb
 
-        # Bottom info
-        layout.addWidget(_separator())
-        self.clock_lbl = _label("--:--:--", size=9, color="#3d444d")
-        self.clock_lbl.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.clock_lbl)
-
-        return sidebar
-
-    def _nav(self, idx: int):
+    def _nav(self, idx):
         self.stack.setCurrentIndex(idx)
-        for i, btn in enumerate(self._nav_btns):
-            btn.setChecked(i == idx)
+        for i, b in enumerate(self._navs): b.setChecked(i == idx)
 
-    # ── Top bar ──────────────────────────────
-    def _build_topbar(self):
+    # topbar
+    def _topbar(self):
         bar = QFrame()
-        bar.setFixedHeight(56)
-        bar.setStyleSheet("""
-            QFrame {
-                background: #010409;
-                border-bottom: 1px solid #21262d;
-            }
-        """)
-        layout = QHBoxLayout(bar)
-        layout.setContentsMargins(20, 0, 20, 0)
-        layout.setSpacing(10)
+        bar.setFixedHeight(54)
+        bar.setStyleSheet("QFrame{background:#010409;border-bottom:1px solid #21262d;}")
+        l = QHBoxLayout(bar)
+        l.setContentsMargins(18, 0, 18, 0); l.setSpacing(10)
 
-        layout.addWidget(_label("LIVE CAPTURE", size=10, bold=True, color="#4d9eff"))
-        layout.addStretch()
+        l.addWidget(_lbl("LIVE CAPTURE", 10, True, "#4d9eff"))
+        l.addStretch()
 
-        # Interface selector
-        layout.addWidget(_label("Interface:", size=9, color="#8b949e"))
-        self.iface_combo = QComboBox()
-        self.iface_combo.addItems(["eth0", "wlan0", "lo", "any"])
-        self.iface_combo.setFixedWidth(110)
-        layout.addWidget(self.iface_combo)
-
-        layout.addSpacing(10)
-
-        # Filter preset dropdown
-        layout.addWidget(_label("Filter:", size=9, color="#8b949e"))
-        from capture.packet_capture import FILTER_PRESETS
+        l.addWidget(_lbl("Filter:", 9, False, "#8b949e"))
         self.filter_combo = QComboBox()
-        self.filter_combo.addItems(list(FILTER_PRESETS.keys()))
+        self.filter_combo.addItems([k for k in FILTER_PRESETS])
         self.filter_combo.setFixedWidth(130)
-        self.filter_combo.currentTextChanged.connect(self._on_filter_preset)
-        layout.addWidget(self.filter_combo)
+        self.filter_combo.currentTextChanged.connect(self._on_preset)
+        l.addWidget(self.filter_combo)
 
-        # Custom BPF input (shown only when "Custom…" is selected)
         self.filter_input = QLineEdit()
-        self.filter_input.setPlaceholderText("BPF: tcp or udp  /  port 80 …")
+        self.filter_input.setPlaceholderText("BPF:  tcp or udp  /  port 80 …")
         self.filter_input.setFixedWidth(220)
         self.filter_input.setVisible(False)
-        layout.addWidget(self.filter_input)
+        l.addWidget(self.filter_input)
 
-        layout.addSpacing(10)
-
-        self.start_btn = self._action_btn("▶  Start", "#00ff88", "#003322")
-        self.stop_btn = self._action_btn("■  Stop", "#ff4444", "#330000")
+        l.addSpacing(8)
+        self.start_btn = self._abtn("▶  Start",  "#00ff88", "#003322")
+        self.stop_btn  = self._abtn("■  Stop",   "#ff4444", "#330000")
         self.stop_btn.setEnabled(False)
-
         self.start_btn.clicked.connect(self.start_capture)
         self.stop_btn.clicked.connect(self.stop_capture)
-
-        layout.addWidget(self.start_btn)
-        layout.addWidget(self.stop_btn)
-
+        l.addWidget(self.start_btn); l.addWidget(self.stop_btn)
         return bar
 
-    def _on_filter_preset(self, text):
-        """Show the custom text box only when 'Custom…' is chosen."""
+    def _abtn(self, text, fg, bg):
+        b = QPushButton(text)
+        b.setFont(QFont(UI_FONT, 10, QFont.Bold))
+        b.setFixedSize(106, 32)
+        b.setStyleSheet(f"""
+            QPushButton{{background:{bg};color:{fg};
+                         border:1px solid {fg}55;border-radius:5px;}}
+            QPushButton:hover{{background:{fg}22;border:1px solid {fg};}}
+            QPushButton:disabled{{background:#161b22;color:#3d444d;
+                                  border:1px solid #21262d;}}""")
+        return b
+
+    def _on_preset(self, text):
         self.filter_input.setVisible(text == "Custom…")
 
-
-
-
-    def _action_btn(self, text, fg, bg):
-        btn = QPushButton(text)
-        btn.setFont(QFont("Consolas", 10, QFont.Bold))
-        btn.setFixedSize(110, 34)
-        btn.setStyleSheet(f"""
-            QPushButton {{
-                background: {bg};
-                color: {fg};
-                border: 1px solid {fg}55;
-                border-radius: 5px;
-            }}
-            QPushButton:hover {{
-                background: {fg}22;
-                border: 1px solid {fg};
-            }}
-            QPushButton:disabled {{
-                background: #161b22;
-                color: #3d444d;
-                border: 1px solid #21262d;
-            }}
-        """)
-        return btn
-
-    # ── Stat strip ───────────────────────────
-    def _build_stat_strip(self):
+    # stat strip
+    def _statstrip(self):
         strip = QFrame()
-        strip.setFixedHeight(104)
-        strip.setStyleSheet("QFrame { background: #0d1117; border-bottom: 1px solid #21262d; }")
-        layout = QHBoxLayout(strip)
-        layout.setContentsMargins(20, 10, 20, 10)
-        layout.setSpacing(12)
-
-        self.card_total   = StatCard("TOTAL PACKETS",     "0",        "#00ff88")
-        self.card_ips     = StatCard("UNIQUE IPs",        "0",        "#4d9eff")
-        self.card_alerts  = StatCard("ALERTS",            "0",        "#ff4444")
-        self.card_bw      = StatCard("AVG BANDWIDTH",     "0 B/s",    "#ffa500")
-        self.card_tcp     = StatCard("TCP",               "0",        "#a371f7")
-        self.card_udp     = StatCard("UDP",               "0",        "#39d353")
-
-        for card in [self.card_total, self.card_ips, self.card_alerts,
-                     self.card_bw, self.card_tcp, self.card_udp]:
-            layout.addWidget(card)
-
+        strip.setFixedHeight(100)
+        strip.setStyleSheet("QFrame{background:#0d1117;border-bottom:1px solid #21262d;}")
+        l = QHBoxLayout(strip)
+        l.setContentsMargins(18, 8, 18, 8); l.setSpacing(10)
+        self.c_total  = StatCard("TOTAL PACKETS",  "0",      "#00ff88")
+        self.c_ips    = StatCard("UNIQUE IPs",      "0",      "#4d9eff")
+        self.c_alerts = StatCard("ALERTS",          "0",      "#ff4444")
+        self.c_bw     = StatCard("AVG BANDWIDTH",   "0 B/s",  "#ffa500")
+        self.c_tcp    = StatCard("TCP",             "0",      "#a371f7")
+        self.c_udp    = StatCard("UDP",             "0",      "#39d353")
+        for c in [self.c_total,self.c_ips,self.c_alerts,
+                  self.c_bw,self.c_tcp,self.c_udp]: l.addWidget(c)
         return strip
 
-    # ── Capture page ─────────────────────────
-    def _build_capture_page(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(20, 16, 20, 16)
-        layout.setSpacing(12)
+    # capture page
+    def _page_capture(self):
+        p = QWidget(); l = QVBoxLayout(p)
+        l.setContentsMargins(18, 14, 18, 14); l.setSpacing(10)
 
-        layout.addWidget(_label("Packet Stream", size=11, bold=True, color="#8b949e"))
+        hdr = QHBoxLayout()
+        hdr.addWidget(_lbl("Packet Stream", 11, True, "#8b949e"))
+        hdr.addStretch()
+        clr = QPushButton("Clear")
+        clr.setFont(QFont(UI_FONT, 8))
+        clr.setFixedSize(60, 24)
+        clr.setStyleSheet("QPushButton{background:transparent;color:#8b949e;"
+                          "border:1px solid #30363d;border-radius:4px;}"
+                          "QPushButton:hover{color:#ff4444;border-color:#ff4444;}")
+        clr.clicked.connect(self._clear)
+        hdr.addWidget(clr)
+        l.addLayout(hdr)
 
-        self.packet_table = QTableWidget()
-        self.packet_table.setColumnCount(6)
-        self.packet_table.setHorizontalHeaderLabels(
-            ["TIME", "SOURCE IP", "DESTINATION IP", "PROTOCOL", "SRC PORT", "DST PORT  /  LENGTH"]
-        )
-        self.packet_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.packet_table.setAlternatingRowColors(True)
-        self.packet_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.packet_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.packet_table.verticalHeader().setVisible(False)
-        self.packet_table.setShowGrid(False)
-        self.packet_table.verticalHeader().setDefaultSectionSize(26)
-        self.packet_table.cellClicked.connect(self.show_packet_details)
-        layout.addWidget(self.packet_table, stretch=3)
+        self.tbl = QTableWidget()
+        self.tbl.setColumnCount(6)
+        self.tbl.setHorizontalHeaderLabels(
+            ["TIME","SOURCE IP","DESTINATION IP","PROTOCOL","SRC PORT","DST PORT / LEN"])
+        self.tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.tbl.setAlternatingRowColors(True)
+        self.tbl.setSelectionBehavior(QTableWidget.SelectRows)
+        self.tbl.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.tbl.verticalHeader().setVisible(False)
+        self.tbl.setShowGrid(False)
+        self.tbl.verticalHeader().setDefaultSectionSize(26)
+        self.tbl.cellClicked.connect(self._inspect)
+        l.addWidget(self.tbl, 3)
 
-        # Details panel
-        detail_header = QHBoxLayout()
-        detail_header.addWidget(_label("Packet Inspector", size=10, bold=True, color="#4d9eff"))
-        clear_btn = QPushButton("Clear all")
-        clear_btn.setFont(QFont("Consolas", 8))
-        clear_btn.setFixedSize(80, 24)
-        clear_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: #8b949e;
-                border: 1px solid #30363d;
-                border-radius: 4px;
-            }
-            QPushButton:hover { color: #ff4444; border-color: #ff4444; }
-        """)
-        clear_btn.clicked.connect(self._clear_packets)
-        detail_header.addStretch()
-        detail_header.addWidget(clear_btn)
-        layout.addLayout(detail_header)
+        l.addWidget(_lbl("Packet Inspector", 10, True, "#4d9eff"))
+        self.inspector = QTextEdit()
+        self.inspector.setReadOnly(True)
+        self.inspector.setFont(QFont("Consolas", 10))
+        self.inspector.setFixedHeight(130)
+        self.inspector.setPlaceholderText("Click a row to inspect packet…")
+        l.addWidget(self.inspector)
+        return p
 
-        self.packet_details = QTextEdit()
-        self.packet_details.setReadOnly(True)
-        self.packet_details.setFont(QFont("Consolas", 10))
-        self.packet_details.setFixedHeight(140)
-        self.packet_details.setPlaceholderText("Click a packet row to inspect…")
-        layout.addWidget(self.packet_details)
-
-        return page
-
-    # ── Analysis page ────────────────────────
-    def _build_analysis_page(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(20, 16, 20, 16)
-        layout.setSpacing(14)
-
-        layout.addWidget(_label("Traffic Analysis", size=11, bold=True, color="#8b949e"))
+    # analysis page
+    def _page_analysis(self):
+        p = QWidget(); l = QVBoxLayout(p)
+        l.setContentsMargins(18, 14, 18, 14); l.setSpacing(12)
+        l.addWidget(_lbl("Traffic Analysis", 11, True, "#8b949e"))
 
         btn_row = QHBoxLayout()
-        charts = [
-            ("Top 10 IPs",     self._chart_ips),
-            ("Top Ports",      self._chart_ports),
-            ("Protocol Split", self._chart_proto),
-            ("Timeline",       self._chart_timeline),
-        ]
-        for txt, fn in charts:
+        for txt, fn in [("Top 10 IPs",self._ch_ips),("Top Ports",self._ch_ports),
+                         ("Protocol Pie",self._ch_proto),("Timeline",self._ch_time)]:
             b = QPushButton(txt)
-            b.setFont(QFont("Consolas", 10))
-            b.setFixedHeight(34)
-            b.setStyleSheet("""
-                QPushButton {
-                    background: #161b22;
-                    color: #4d9eff;
-                    border: 1px solid #30363d;
-                    border-radius: 5px;
-                }
-                QPushButton:hover {
-                    background: #1f6feb22;
-                    border-color: #4d9eff;
-                }
-            """)
-            b.clicked.connect(fn)
-            btn_row.addWidget(b)
-        layout.addLayout(btn_row)
+            b.setFont(QFont(UI_FONT, 10)); b.setFixedHeight(32)
+            b.setStyleSheet("QPushButton{background:#161b22;color:#4d9eff;"
+                            "border:1px solid #30363d;border-radius:4px;}"
+                            "QPushButton:hover{background:#1f6feb22;border-color:#4d9eff;}")
+            b.clicked.connect(fn); btn_row.addWidget(b)
+        l.addLayout(btn_row)
 
-        # Top IPs table
-        split = QHBoxLayout()
-        split.setSpacing(16)
+        split = QHBoxLayout(); split.setSpacing(14)
+        lv = QVBoxLayout()
+        lv.addWidget(_lbl("Top Source IPs", 10, False, "#4d9eff"))
+        self.tbl_ips = self._mini(["IP Address","Packets"])
+        lv.addWidget(self.tbl_ips)
+        rv = QVBoxLayout()
+        rv.addWidget(_lbl("Top Ports", 10, False, "#a371f7"))
+        self.tbl_ports = self._mini(["Port","Packets"])
+        rv.addWidget(self.tbl_ports)
+        split.addLayout(lv); split.addLayout(rv)
+        l.addLayout(split, 1)
 
-        left = QVBoxLayout()
-        left.addWidget(_label("Top Source IPs", size=10, color="#4d9eff"))
-        self.top_ips_table = self._mini_table(["IP Address", "Packets"])
-        left.addWidget(self.top_ips_table)
-        split.addLayout(left)
+        ref = QPushButton("⟳  Refresh Tables")
+        ref.setFont(QFont(UI_FONT, 9)); ref.setFixedHeight(28)
+        ref.setStyleSheet("QPushButton{background:transparent;color:#39d353;"
+                          "border:1px solid #39d35344;border-radius:4px;}"
+                          "QPushButton:hover{border-color:#39d353;background:#39d35311;}")
+        ref.clicked.connect(self._refresh)
+        l.addWidget(ref)
+        return p
 
-        right = QVBoxLayout()
-        right.addWidget(_label("Top Ports", size=10, color="#a371f7"))
-        self.top_ports_table = self._mini_table(["Port", "Packets"])
-        right.addWidget(self.top_ports_table)
-        split.addLayout(right)
-
-        layout.addLayout(split, stretch=1)
-
-        refresh = QPushButton("⟳  Refresh Tables")
-        refresh.setFont(QFont("Consolas", 9))
-        refresh.setFixedHeight(30)
-        refresh.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: #39d353;
-                border: 1px solid #39d35344;
-                border-radius: 4px;
-            }
-            QPushButton:hover { border-color: #39d353; background: #39d35311; }
-        """)
-        refresh.clicked.connect(self._refresh_analysis)
-        layout.addWidget(refresh)
-
-        return page
-
-    def _mini_table(self, headers):
-        t = QTableWidget()
-        t.setColumnCount(len(headers))
+    def _mini(self, headers):
+        t = QTableWidget(); t.setColumnCount(len(headers))
         t.setHorizontalHeaderLabels(headers)
         t.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         t.setAlternatingRowColors(True)
@@ -572,148 +348,86 @@ class MainWindow(QMainWindow):
         t.setSelectionBehavior(QTableWidget.SelectRows)
         t.verticalHeader().setVisible(False)
         t.setShowGrid(False)
-        t.verticalHeader().setDefaultSectionSize(24)
+        t.verticalHeader().setDefaultSectionSize(22)
         return t
 
-    # ── Alerts page ──────────────────────────
-    def _build_alerts_page(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(20, 16, 20, 16)
-        layout.setSpacing(12)
+    # alerts page
+    def _page_alerts(self):
+        p = QWidget(); l = QVBoxLayout(p)
+        l.setContentsMargins(18, 14, 18, 14); l.setSpacing(10)
 
         hdr = QHBoxLayout()
-        hdr.addWidget(_label("Security Alerts", size=11, bold=True, color="#8b949e"))
+        hdr.addWidget(_lbl("Security Alerts", 11, True, "#8b949e"))
         hdr.addStretch()
         clr = QPushButton("Clear Alerts")
-        clr.setFont(QFont("Consolas", 9))
-        clr.setFixedSize(100, 28)
-        clr.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: #ff4444;
-                border: 1px solid #ff444444;
-                border-radius: 4px;
-            }
-            QPushButton:hover { border-color: #ff4444; background: #ff444411; }
-        """)
+        clr.setFont(QFont(UI_FONT, 9)); clr.setFixedSize(96, 26)
+        clr.setStyleSheet("QPushButton{background:transparent;color:#ff4444;"
+                          "border:1px solid #ff444444;border-radius:4px;}"
+                          "QPushButton:hover{border-color:#ff4444;background:#ff444411;}")
         clr.clicked.connect(self._clear_alerts)
-        hdr.addWidget(clr)
-        layout.addLayout(hdr)
+        hdr.addWidget(clr); l.addLayout(hdr)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: 1px solid #30363d; border-radius: 6px; }")
+        scroll = QScrollArea(); scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea{border:1px solid #30363d;border-radius:5px;}")
+        self.alerts_box = QWidget()
+        self.alerts_lay = QVBoxLayout(self.alerts_box)
+        self.alerts_lay.setContentsMargins(8,8,8,8); self.alerts_lay.setSpacing(4)
+        self.alerts_lay.addStretch()
+        scroll.setWidget(self.alerts_box); l.addWidget(scroll)
 
-        self.alerts_container = QWidget()
-        self.alerts_layout = QVBoxLayout(self.alerts_container)
-        self.alerts_layout.setContentsMargins(8, 8, 8, 8)
-        self.alerts_layout.setSpacing(4)
-        self.alerts_layout.addStretch()
+        thr = QHBoxLayout()
+        thr.addWidget(_lbl("Anomaly threshold (pkts/IP):", 9, False, "#8b949e"))
+        self.thr_input = QLineEdit("300"); self.thr_input.setFixedWidth(72)
+        ok = QPushButton("Apply"); ok.setFont(QFont(UI_FONT,9)); ok.setFixedSize(64,24)
+        ok.setStyleSheet("QPushButton{background:#003322;color:#00ff88;"
+                         "border:1px solid #00ff8844;border-radius:4px;}"
+                         "QPushButton:hover{border-color:#00ff88;}")
+        ok.clicked.connect(self._apply_thr)
+        thr.addWidget(self.thr_input); thr.addWidget(ok); thr.addStretch()
+        l.addLayout(thr)
+        return p
 
-        scroll.setWidget(self.alerts_container)
-        layout.addWidget(scroll)
+    # export page
+    def _page_export(self):
+        p = QWidget(); l = QVBoxLayout(p)
+        l.setContentsMargins(18, 14, 18, 14); l.setSpacing(14)
+        l.addWidget(_lbl("Data Export", 11, True, "#8b949e"))
+        l.addWidget(_lbl("Save captured packets and statistics to CSV or Excel.", 9, False, "#4d9eff"))
+        l.addWidget(_sep())
 
-        # Threshold control
-        thr_row = QHBoxLayout()
-        thr_row.addWidget(_label("Anomaly threshold (packets/IP):", size=9, color="#8b949e"))
-        self.threshold_input = QLineEdit("300")
-        self.threshold_input.setFixedWidth(80)
-        apply_btn = QPushButton("Apply")
-        apply_btn.setFont(QFont("Consolas", 9))
-        apply_btn.setFixedSize(70, 26)
-        apply_btn.setStyleSheet("""
-            QPushButton {
-                background: #003322;
-                color: #00ff88;
-                border: 1px solid #00ff8844;
-                border-radius: 4px;
-            }
-            QPushButton:hover { border-color: #00ff88; }
-        """)
-        apply_btn.clicked.connect(self._apply_threshold)
-        thr_row.addWidget(self.threshold_input)
-        thr_row.addWidget(apply_btn)
-        thr_row.addStretch()
-        layout.addLayout(thr_row)
-
-        return page
-
-    # ── Export page ──────────────────────────
-    def _build_export_page(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(20, 16, 20, 16)
-        layout.setSpacing(16)
-
-        layout.addWidget(_label("Data Export", size=11, bold=True, color="#8b949e"))
-        layout.addWidget(_label(
-            "Export captured packets and statistics to CSV or Excel format.",
-            size=9, color="#4d9eff"))
-        layout.addWidget(_separator())
-
-        for label, fn, color in [
-            ("⤓  Export Packets → CSV",   self._export_csv,   "#00ff88"),
-            ("⤓  Export Packets → Excel", self._export_excel, "#39d353"),
-            ("⤓  Export Stats → CSV",     self._export_stats, "#4d9eff"),
+        for txt, fn, col in [
+            ("⤓  Export Packets → CSV",    self._exp_csv,   "#00ff88"),
+            ("⤓  Export Packets → Excel",  self._exp_excel, "#39d353"),
+            ("⤓  Export Statistics → CSV", self._exp_stats, "#4d9eff"),
         ]:
-            btn = QPushButton(label)
-            btn.setFont(QFont("Consolas", 11))
-            btn.setFixedHeight(44)
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: {color}11;
-                    color: {color};
-                    border: 1px solid {color}44;
-                    border-radius: 6px;
-                    text-align: left;
-                    padding-left: 20px;
-                }}
-                QPushButton:hover {{
-                    background: {color}22;
-                    border: 1px solid {color};
-                }}
-            """)
-            btn.clicked.connect(fn)
-            layout.addWidget(btn)
+            b = QPushButton(txt); b.setFont(QFont(UI_FONT,11)); b.setFixedHeight(42)
+            b.setStyleSheet(f"QPushButton{{background:{col}11;color:{col};"
+                            f"border:1px solid {col}44;border-radius:5px;"
+                            f"text-align:left;padding-left:18px;}}"
+                            f"QPushButton:hover{{background:{col}22;border:1px solid {col};}}")
+            b.clicked.connect(fn); l.addWidget(b)
 
-        layout.addStretch()
+        l.addStretch()
+        self.exp_log = QTextEdit(); self.exp_log.setReadOnly(True)
+        self.exp_log.setFixedHeight(90); self.exp_log.setFont(QFont("Consolas",9))
+        self.exp_log.setPlaceholderText("Export log…")
+        l.addWidget(self.exp_log)
+        return p
 
-        self.export_log = QTextEdit()
-        self.export_log.setReadOnly(True)
-        self.export_log.setFixedHeight(100)
-        self.export_log.setFont(QFont("Consolas", 9))
-        self.export_log.setPlaceholderText("Export log…")
-        layout.addWidget(self.export_log)
-
-        return page
-
-    # ── Status bar ───────────────────────────
-    def _build_statusbar(self):
-        bar = QFrame()
-        bar.setFixedHeight(30)
-        bar.setStyleSheet("QFrame { background: #010409; border-top: 1px solid #21262d; }")
-        layout = QHBoxLayout(bar)
-        layout.setContentsMargins(16, 0, 16, 0)
-
-        self.status_lbl = _label("●  Idle", size=9, color="#4d9eff")
-        layout.addWidget(self.status_lbl)
-        layout.addStretch()
-
-        self.pkt_rate_lbl = _label("0 pkt/s", size=9, color="#8b949e")
-        layout.addWidget(self.pkt_rate_lbl)
-        layout.addSpacing(20)
-        self.total_lbl = _label("0 packets total", size=9, color="#8b949e")
-        layout.addWidget(self.total_lbl)
-
+    # statusbar
+    def _statusbar(self):
+        bar = QFrame(); bar.setFixedHeight(28)
+        bar.setStyleSheet("QFrame{background:#010409;border-top:1px solid #21262d;}")
+        l = QHBoxLayout(bar); l.setContentsMargins(14,0,14,0)
+        self.st_lbl = _lbl("●  Idle", 9, False, "#4d9eff"); l.addWidget(self.st_lbl)
+        l.addStretch()
+        self.rate_lbl  = _lbl("0 pkt/s",         9, False, "#8b949e"); l.addWidget(self.rate_lbl)
+        l.addSpacing(16)
+        self.total_lbl = _lbl("0 packets total", 9, False, "#8b949e"); l.addWidget(self.total_lbl)
         return bar
 
-    # ──────────────────────────────────────────
-    #  Capture control
-    # ──────────────────────────────────────────
+    # ── Capture control ──────────────────────────────────────
     def start_capture(self):
-        from capture.packet_capture import FILTER_PRESETS
-
         preset = self.filter_combo.currentText()
         if preset == "Custom…":
             bpf = self.filter_input.text().strip()
@@ -722,246 +436,191 @@ class MainWindow(QMainWindow):
 
         self.capture.set_filter(bpf)
         self._start_ts = time.time()
-        self._bytes = 0
-        self._pkt_last = 0
-        self._pkt_last_time = time.time()
+        self._bytes = self._pkt_last = 0
+        self._pkt_t = time.time()
 
-        thread = threading.Thread(target=self.capture.start, daemon=True)
-        thread.start()
+        t = threading.Thread(target=self.capture.start, daemon=True)
+        t.start()
 
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
-        self.status_lbl.setText("●  Capturing…")
-        self.status_lbl.setStyleSheet(
-            "color: #00ff88; background: transparent; font-size: 9pt;")
-
-    def _show_capture_error(self, message: str):
-        from PyQt5.QtWidgets import QMessageBox
-        dlg = QMessageBox(self)
-        dlg.setWindowTitle("Capture Error")
-        dlg.setText(message)
-        dlg.setIcon(QMessageBox.Warning)
-        dlg.setStyleSheet("""
-            QMessageBox {
-                background: #161b22;
-                color: #c9d1d9;
-                font-family: Consolas;
-            }
-            QLabel { color: #c9d1d9; font-family: Consolas; font-size: 10pt; }
-            QPushButton {
-                background: #21262d;
-                color: #c9d1d9;
-                border: 1px solid #30363d;
-                border-radius: 4px;
-                padding: 6px 16px;
-                font-family: Consolas;
-            }
-        """)
-        dlg.exec_()
+        self.st_lbl.setText("●  Capturing…")
+        self.st_lbl.setStyleSheet("color:#00ff88;background:transparent;font-size:9pt;")
 
     def stop_capture(self):
         self.capture.stop()
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
-        self.status_lbl.setText("●  Stopped")
-        self.status_lbl.setStyleSheet("color: #ff4444; background: transparent; font-size: 9pt;")
+        self.st_lbl.setText("●  Stopped")
+        self.st_lbl.setStyleSheet("color:#ff4444;background:transparent;font-size:9pt;")
 
-    # ──────────────────────────────────────────
-    #  Packet processing (worker thread → UI)
-    # ──────────────────────────────────────────
-    def _on_packet_raw(self, packet):
-        """Called from capture thread — emit signal to UI thread."""
+    # ── Packet pipeline ──────────────────────────────────────
+    def _raw_callback(self, packet):
+        """Called from capture thread — just emit signals, no UI work here."""
+        if packet.get("__error__"):
+            self.bridge.packet_received.emit(packet)
+            return
+
         packet["time"] = time.strftime("%H:%M:%S")
-        self.analyzer.analyze(packet)
-        alert = self.detector.check(packet)
         self._bytes += packet.get("length", 0)
+
+        try:
+            self.analyzer.analyze(packet)
+            alert = self.detector.check(packet)
+        except Exception:
+            alert = None
+
         self.bridge.packet_received.emit(packet)
         if alert:
             self.bridge.alert_received.emit(alert)
 
-    # ── Updated _on_packet_ui — handles errors ───────────────
-    def _on_packet_ui(self, packet):
-        # Error packet from capture thread
+    def _on_packet(self, packet):
+        """Called on UI thread via Qt signal."""
         if packet.get("__error__"):
-            self._show_capture_error(packet["message"])
+            self._show_error(packet.get("message", "Unknown error"))
             self.stop_capture()
             return
 
         self.packets.append(packet)
-        self._add_table_row(packet)
+        self._add_row(packet)
+
         n = len(self.packets)
-        self.card_total.update_value(str(n))
-        self.card_ips.update_value(str(len(self.analyzer.ip_counter)))
-        tcp = sum(1 for p in self.packets if p["protocol"] == "TCP")
-        udp = sum(1 for p in self.packets if p["protocol"] == "UDP")
-        self.card_tcp.update_value(str(tcp))
-        self.card_udp.update_value(str(udp))
+        self.c_total.set(n)
+        self.c_ips.set(len(self.analyzer.ip_counter))
+        self.c_tcp.set(sum(1 for p in self.packets if p["protocol"] == "TCP"))
+        self.c_udp.set(sum(1 for p in self.packets if p["protocol"] == "UDP"))
         self.total_lbl.setText(f"{n} packets total")
 
-    def _on_alert_ui(self, msg):
+    def _on_alert(self, msg):
         self.alerts.append(msg)
-        self.card_alerts.update_value(str(len(self.alerts)))
-        row = AlertRow(msg)
-        self.alerts_layout.insertWidget(self.alerts_layout.count() - 1, row)
+        self.c_alerts.set(len(self.alerts))
+        colors = {"⚠": "#ffa500", "🔴": "#ff4444"}
+        color  = colors.get(msg[0], "#ffa500")
+        ts     = datetime.now().strftime("%H:%M:%S")
+        row    = QFrame()
+        row.setStyleSheet(f"QFrame{{background:#161b22;border-left:3px solid {color};"
+                          "border-radius:3px;margin:1px 0;}}")
+        rl = QHBoxLayout(row); rl.setContentsMargins(8,5,8,5)
+        rl.addWidget(_lbl(ts,  8, False, "#8b949e"))
+        rl.addWidget(_lbl(msg, 8, False, color), 1)
+        self.alerts_lay.insertWidget(self.alerts_lay.count()-1, row)
 
-    def _add_table_row(self, packet):
-        row = self.packet_table.rowCount()
-        self.packet_table.insertRow(row)
-        proto_colors = {"TCP": "#a371f7", "UDP": "#39d353", "OTHER": "#ffa500"}
-        color = proto_colors.get(packet["protocol"], "#c9d1d9")
-        vals = [
-            packet["time"],
-            packet["src_ip"],
-            packet["dst_ip"],
-            packet["protocol"],
-            str(packet["src_port"]),
-            f'{packet["dst_port"]}  ·  {packet["length"]}B',
-        ]
-        for col, val in enumerate(vals):
-            item = QTableWidgetItem(val)
-            item.setFont(QFont("Consolas", 9))
+    def _add_row(self, p):
+        PC = {"TCP": "#a371f7", "UDP": "#39d353", "OTHER": "#ffa500"}
+        row = self.tbl.rowCount()
+        self.tbl.insertRow(row)
+        vals = [p["time"], p["src_ip"], p["dst_ip"], p["protocol"],
+                str(p["src_port"]), f'{p["dst_port"]} / {p["length"]}B']
+        for col, v in enumerate(vals):
+            item = QTableWidgetItem(v)
+            item.setFont(QFont("Consolas", 10))
             if col == 3:
-                item.setForeground(QColor(color))
-            self.packet_table.setItem(row, col, item)
+                item.setForeground(QColor(PC.get(v, "#c9d1d9")))
+            self.tbl.setItem(row, col, item)
+        if row > 300:
+            self.tbl.scrollToBottom()
 
-        # Auto-scroll
-        if row > 200:
-            self.packet_table.scrollToBottom()
-
-    # ──────────────────────────────────────────
-    #  Packet inspector
-    # ──────────────────────────────────────────
-    def show_packet_details(self, row, _col=0):
-        if row >= len(self.packets):
-            return
+    # ── Packet inspector ─────────────────────────────────────
+    def _inspect(self, row, _=0):
+        if row >= len(self.packets): return
         p = self.packets[row]
-        self.packet_details.setHtml(f"""
-<pre style="color:#c9d1d9; font-family:Consolas; font-size:10pt; line-height:1.6;">
-<span style="color:#4d9eff">═══ PACKET #{row+1} ═══════════════════════════════</span>
+        self.inspector.setHtml(f"""
+<pre style="color:#c9d1d9;font-family:Consolas;font-size:10pt;line-height:1.7;">
+<span style="color:#4d9eff">═══ PACKET #{row+1} ══════════════════════</span>
 
-  <span style="color:#8b949e">Time:</span>             <span style="color:#00ff88">{p['time']}</span>
-  <span style="color:#8b949e">Protocol:</span>         <span style="color:#a371f7">{p['protocol']}</span>
+  <span style="color:#8b949e">Time:</span>              <span style="color:#00ff88">{p['time']}</span>
+  <span style="color:#8b949e">Protocol:</span>          <span style="color:#a371f7">{p['protocol']}</span>
 
-  <span style="color:#8b949e">Source IP:</span>        <span style="color:#ffa500">{p['src_ip']}</span>
-  <span style="color:#8b949e">Destination IP:</span>   <span style="color:#ffa500">{p['dst_ip']}</span>
+  <span style="color:#8b949e">Source IP:</span>         <span style="color:#ffa500">{p['src_ip']}</span>
+  <span style="color:#8b949e">Destination IP:</span>    <span style="color:#ffa500">{p['dst_ip']}</span>
 
-  <span style="color:#8b949e">Source Port:</span>      <span style="color:#c9d1d9">{p['src_port']}</span>
-  <span style="color:#8b949e">Destination Port:</span> <span style="color:#c9d1d9">{p['dst_port']}</span>
+  <span style="color:#8b949e">Source Port:</span>       <span style="color:#c9d1d9">{p['src_port']}</span>
+  <span style="color:#8b949e">Destination Port:</span>  <span style="color:#c9d1d9">{p['dst_port']}</span>
 
-  <span style="color:#8b949e">Length:</span>           <span style="color:#39d353">{p['length']} bytes</span>
+  <span style="color:#8b949e">Length:</span>            <span style="color:#39d353">{p['length']} bytes</span>
 </pre>""")
 
-    # ──────────────────────────────────────────
-    #  Analysis
-    # ──────────────────────────────────────────
-    def _refresh_analysis(self):
-        top_ips = self.analyzer.get_top_ips()
-        self.top_ips_table.setRowCount(0)
-        for ip, cnt in top_ips:
-            r = self.top_ips_table.rowCount()
-            self.top_ips_table.insertRow(r)
-            self.top_ips_table.setItem(r, 0, QTableWidgetItem(ip))
-            self.top_ips_table.setItem(r, 1, QTableWidgetItem(str(cnt)))
+    # ── Analysis ─────────────────────────────────────────────
+    def _refresh(self):
+        self.tbl_ips.setRowCount(0)
+        for ip, cnt in self.analyzer.get_top_ips():
+            r = self.tbl_ips.rowCount(); self.tbl_ips.insertRow(r)
+            self.tbl_ips.setItem(r,0,QTableWidgetItem(ip))
+            self.tbl_ips.setItem(r,1,QTableWidgetItem(str(cnt)))
+        self.tbl_ports.setRowCount(0)
+        for port, cnt in self.analyzer.get_top_ports():
+            r = self.tbl_ports.rowCount(); self.tbl_ports.insertRow(r)
+            self.tbl_ports.setItem(r,0,QTableWidgetItem(str(port)))
+            self.tbl_ports.setItem(r,1,QTableWidgetItem(str(cnt)))
 
-        top_ports = self.analyzer.get_top_ports()
-        self.top_ports_table.setRowCount(0)
-        for port, cnt in top_ports:
-            r = self.top_ports_table.rowCount()
-            self.top_ports_table.insertRow(r)
-            self.top_ports_table.setItem(r, 0, QTableWidgetItem(str(port)))
-            self.top_ports_table.setItem(r, 1, QTableWidgetItem(str(cnt)))
+    def _ch_ips(self):   plot_top_ips(self.analyzer.get_top_ips())
+    def _ch_ports(self): plot_top_ports(self.analyzer.get_top_ports())
+    def _ch_proto(self):
+        tcp = sum(1 for p in self.packets if p["protocol"]=="TCP")
+        udp = sum(1 for p in self.packets if p["protocol"]=="UDP")
+        plot_protocol_pie({"TCP":tcp,"UDP":udp,"OTHER":len(self.packets)-tcp-udp})
+    def _ch_time(self):  plot_traffic_timeline(self.packets)
 
-    def _chart_ips(self):
-        plot_top_ips(self.analyzer.get_top_ips())
-
-    def _chart_ports(self):
-        plot_top_ports(self.analyzer.get_top_ports())
-
-    def _chart_proto(self):
-        tcp = sum(1 for p in self.packets if p["protocol"] == "TCP")
-        udp = sum(1 for p in self.packets if p["protocol"] == "UDP")
-        oth = len(self.packets) - tcp - udp
-        plot_protocol_pie({"TCP": tcp, "UDP": udp, "OTHER": oth})
-
-    def _chart_timeline(self):
-        plot_traffic_timeline(self.packets)
-
-    # ──────────────────────────────────────────
-    #  Alerts
-    # ──────────────────────────────────────────
+    # ── Alerts ───────────────────────────────────────────────
     def _clear_alerts(self):
         self.alerts.clear()
-        while self.alerts_layout.count() > 1:
-            item = self.alerts_layout.takeAt(0)
-            w = item.widget()
-            if w:
-                w.deleteLater()
-        self.card_alerts.update_value("0")
+        while self.alerts_lay.count() > 1:
+            w = self.alerts_lay.takeAt(0).widget()
+            if w: w.deleteLater()
+        self.c_alerts.set(0)
 
-    def _apply_threshold(self):
-        try:
-            val = int(self.threshold_input.text())
-            self.detector.threshold = val
-        except ValueError:
-            pass
+    def _apply_thr(self):
+        try: self.detector.threshold = int(self.thr_input.text())
+        except ValueError: pass
 
-    # ──────────────────────────────────────────
-    #  Export
-    # ──────────────────────────────────────────
-    def _export_csv(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Save CSV", "packets.csv",
-                                              "CSV Files (*.csv)")
+    # ── Export ───────────────────────────────────────────────
+    def _exp_csv(self):
+        path, _ = QFileDialog.getSaveFileName(self,"Save CSV","packets.csv","CSV (*.csv)")
         if path:
             DataExporter(self.packets).export_csv(path)
-            self.export_log.append(f"[{time.strftime('%H:%M:%S')}] CSV saved → {path}")
+            self.exp_log.append(f"[{time.strftime('%H:%M:%S')}] CSV → {path}")
 
-    def _export_excel(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Save Excel", "packets.xlsx",
-                                              "Excel Files (*.xlsx)")
+    def _exp_excel(self):
+        path, _ = QFileDialog.getSaveFileName(self,"Save Excel","packets.xlsx","Excel (*.xlsx)")
         if path:
             DataExporter(self.packets).export_excel(path)
-            self.export_log.append(f"[{time.strftime('%H:%M:%S')}] Excel saved → {path}")
+            self.exp_log.append(f"[{time.strftime('%H:%M:%S')}] Excel → {path}")
 
-    def _export_stats(self):
+    def _exp_stats(self):
         import pandas as pd
-        path, _ = QFileDialog.getSaveFileName(self, "Save Stats CSV", "stats.csv",
-                                              "CSV Files (*.csv)")
+        path, _ = QFileDialog.getSaveFileName(self,"Save Stats","stats.csv","CSV (*.csv)")
         if path:
-            rows = [{"ip": ip, "packets": cnt}
-                    for ip, cnt in self.analyzer.ip_counter.items()]
-            pd.DataFrame(rows).to_csv(path, index=False)
-            self.export_log.append(f"[{time.strftime('%H:%M:%S')}] Stats saved → {path}")
+            rows = [{"ip":ip,"packets":c} for ip,c in self.analyzer.ip_counter.items()]
+            pd.DataFrame(rows).to_csv(path,index=False)
+            self.exp_log.append(f"[{time.strftime('%H:%M:%S')}] Stats → {path}")
 
-    # ──────────────────────────────────────────
-    #  Misc
-    # ──────────────────────────────────────────
-    def _clear_packets(self):
-        self.packets.clear()
-        self.packet_table.setRowCount(0)
-        self.packet_details.clear()
-        self.card_total.update_value("0")
-        self.card_tcp.update_value("0")
-        self.card_udp.update_value("0")
+    # ── Misc ─────────────────────────────────────────────────
+    def _clear(self):
+        self.packets.clear(); self.tbl.setRowCount(0); self.inspector.clear()
+        self.c_total.set(0); self.c_tcp.set(0); self.c_udp.set(0)
 
     def _tick(self):
-        self.clock_lbl.setText(time.strftime("%H:%M:%S"))
+        self._clock_lbl.setText(time.strftime("%H:%M:%S"))
         elapsed = time.time() - self._start_ts if self._start_ts else 1
         bw = self._bytes / max(elapsed, 1)
-        if bw >= 1_000_000:
-            bw_str = f"{bw/1_000_000:.1f} MB/s"
-        elif bw >= 1000:
-            bw_str = f"{bw/1000:.1f} KB/s"
-        else:
-            bw_str = f"{int(bw)} B/s"
-        self.card_bw.update_value(bw_str)
+        if bw >= 1_000_000: s = f"{bw/1_000_000:.1f} MB/s"
+        elif bw >= 1000:     s = f"{bw/1000:.1f} KB/s"
+        else:                s = f"{int(bw)} B/s"
+        self.c_bw.set(s)
 
-        # Packets per second (last second)
-        now = time.time()
-        n = len(self.packets)
-        if hasattr(self, "_pkt_last_time"):
-            dt = now - self._pkt_last_time
-            if dt >= 1.0:
-                rate = (n - self._pkt_last) / dt
-                self.pkt_rate_lbl.setText(f"{rate:.0f} pkt/s")
-                self._pkt_last = n
-                self._pkt_last_time = now
+        now = time.time(); n = len(self.packets)
+        dt = now - self._pkt_t
+        if dt >= 1.0:
+            self.rate_lbl.setText(f"{(n - self._pkt_last)/dt:.0f} pkt/s")
+            self._pkt_last = n; self._pkt_t = now
+
+    def _show_error(self, msg):
+        dlg = QMessageBox(self)
+        dlg.setWindowTitle("Capture Error"); dlg.setText(msg)
+        dlg.setIcon(QMessageBox.Warning)
+        dlg.setStyleSheet("""
+            QMessageBox{background:#161b22;}
+            QLabel{color:#c9d1d9;font-family:Consolas;font-size:10pt;}
+            QPushButton{background:#21262d;color:#c9d1d9;
+                        border:1px solid #30363d;border-radius:4px;padding:5px 14px;}""")
+        dlg.exec_()
