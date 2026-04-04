@@ -30,7 +30,7 @@ DATA_FONT = "Consolas"      # IPs, ports, packet inspector, export log
 
 
 # ── Helper widgets ───────────────────────────────────────────
-def _lbl(text, size=11, bold=False, color="#c9d1d9"):
+def _lbl(text, size=12, bold=False, color="#e6edf3"):
     w = QLabel(text)
     f = QFont(UI_FONT, size)
     f.setBold(bold)
@@ -41,23 +41,23 @@ def _lbl(text, size=11, bold=False, color="#c9d1d9"):
 
 def _sep():
     l = QFrame(); l.setFrameShape(QFrame.HLine)
-    l.setStyleSheet("color:#30363d;"); return l
+    l.setStyleSheet("color:#3d444d;"); return l
 
 
 class StatCard(QFrame):
-    def __init__(self, title, value="0", accent="#00ff88"):
+    def __init__(self, title, value="0", accent="#2ea043"):
         super().__init__()
         self._accent = accent
         self.setFixedHeight(86)
         self.setStyleSheet(f"""
-            QFrame{{background:#161b22;border:1px solid #30363d;
+            QFrame{{background:#161b22;border:1px solid #3d444d;
                     border-top:3px solid {accent};border-radius:6px;}}""")
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 8, 12, 8); lay.setSpacing(3)
-        self.val = _lbl(value, 20, True, accent)
+        self.val = _lbl(value, 22, True, accent)
         self.ttl = QLabel(title)
-        self.ttl.setFont(QFont(UI_FONT, 9))
-        self.ttl.setStyleSheet("color:#8b949e;background:transparent;letter-spacing:1px;")
+        self.ttl.setFont(QFont(UI_FONT, 10, QFont.Bold))
+        self.ttl.setStyleSheet("color:#a1abb5;background:transparent;letter-spacing:1px;")
         lay.addWidget(self.val)
         lay.addWidget(self.ttl)
 
@@ -68,43 +68,43 @@ class NavBtn(QPushButton):
     def __init__(self, icon, text):
         super().__init__(f"  {icon}  {text}")
         self.setCheckable(True)
-        self.setFont(QFont(UI_FONT, 10))
-        self.setFixedHeight(40)
+        self.setFont(QFont(UI_FONT, 11))
+        self.setFixedHeight(42)
         self.setStyleSheet("""
-            QPushButton{background:transparent;color:#8b949e;border:none;
-                        text-align:left;padding-left:10px;border-radius:4px;}
-            QPushButton:hover{background:#21262d;color:#c9d1d9;}
-            QPushButton:checked{background:#0d1117;color:#00ff88;
-                                border-left:3px solid #00ff88;}""")
+            QPushButton{background:transparent;color:#a1abb5;border:none;
+                        text-align:left;padding-left:10px;border-radius:6px;}
+            QPushButton:hover{background:#21262d;color:#e6edf3;}
+            QPushButton:checked{background:#0d1117;color:#58a6ff;
+                                border-left:4px solid #58a6ff;}""")
 
 
 # ── Main Window ──────────────────────────────────────────────
 class MainWindow(QMainWindow):
 
     STYLE = """
-    QMainWindow,QWidget{background:#0d1117;color:#c9d1d9;
-                        font-family:'Segoe UI',Arial,sans-serif;font-size:11px;}
-    QTableWidget{background:#161b22;alternate-background-color:#1c2128;
-                 color:#c9d1d9;gridline-color:#30363d;border:1px solid #30363d;
-                 border-radius:5px;selection-background-color:#1f6feb33;
-                 selection-color:#4d9eff;}
-    QHeaderView::section{background:#21262d;color:#8b949e;border:none;
-                         border-bottom:1px solid #30363d;padding:5px 10px;
-                         font-family:'Segoe UI';font-size:10px;letter-spacing:1px;}
-    QScrollBar:vertical{background:#161b22;width:7px;border-radius:3px;}
-    QScrollBar::handle:vertical{background:#30363d;border-radius:3px;}
-    QScrollBar::handle:vertical:hover{background:#4d9eff;}
-    QScrollBar:horizontal{background:#161b22;height:7px;}
-    QScrollBar::handle:horizontal{background:#30363d;border-radius:3px;}
-    QTextEdit{background:#161b22;color:#7ee787;border:1px solid #30363d;
-              border-radius:5px;padding:6px;font-family:Consolas;}
-    QLineEdit{background:#161b22;color:#c9d1d9;border:1px solid #30363d;
-              border-radius:4px;padding:5px 10px;font-family:'Segoe UI';}
-    QLineEdit:focus{border:1px solid #4d9eff;}
-    QComboBox{background:#161b22;color:#c9d1d9;border:1px solid #30363d;
-              border-radius:4px;padding:4px 10px;font-family:'Segoe UI';}
+    QMainWindow,QWidget{background:#0d1117;color:#e6edf3;
+                        font-family:'Segoe UI', Arial, sans-serif;font-size:12px;}
+    QTableWidget{background:#161b22;alternate-background-color:#1e2329;
+                 color:#e6edf3;gridline-color:#3d444d;border:1px solid #3d444d;
+                 border-radius:6px;selection-background-color:#224b7a;
+                 selection-color:#ffffff;}
+    QHeaderView::section{background:#21262d;color:#e6edf3;border:none;
+                         border-bottom:2px solid #3d444d;padding:6px 10px;
+                         font-family:'Segoe UI';font-size:11px;font-weight:bold;letter-spacing:1px;}
+    QScrollBar:vertical{background:#161b22;width:9px;border-radius:4px;}
+    QScrollBar::handle:vertical{background:#484f58;border-radius:4px;}
+    QScrollBar::handle:vertical:hover{background:#58a6ff;}
+    QScrollBar:horizontal{background:#161b22;height:9px;}
+    QScrollBar::handle:horizontal{background:#484f58;border-radius:4px;}
+    QTextEdit{background:#0d1117;color:#3fb950;border:1px solid #3d444d;
+              border-radius:6px;padding:8px;font-family:Consolas, monospace; line-height: 1.5;}
+    QLineEdit{background:#0d1117;color:#e6edf3;border:1px solid #3d444d;
+              border-radius:5px;padding:6px 12px;font-family:'Segoe UI';}
+    QLineEdit:focus{border:1px solid #58a6ff;}
+    QComboBox{background:#0d1117;color:#e6edf3;border:1px solid #3d444d;
+              border-radius:5px;padding:5px 12px;font-family:'Segoe UI';}
     QComboBox::drop-down{border:none;}
-    QComboBox QAbstractItemView{background:#161b22;color:#c9d1d9;
+    QComboBox QAbstractItemView{background:#161b22;color:#e6edf3;
                                 selection-background-color:#1f6feb;
                                 font-family:'Segoe UI';}
     """
@@ -164,17 +164,17 @@ class MainWindow(QMainWindow):
     # sidebar
     def _sidebar(self):
         sb = QFrame()
-        sb.setFixedWidth(200)
+        sb.setFixedWidth(210)
         sb.setStyleSheet("QFrame{background:#010409;border-right:1px solid #21262d;}")
         l = QVBoxLayout(sb)
-        l.setContentsMargins(10, 18, 10, 18); l.setSpacing(4)
+        l.setContentsMargins(12, 20, 12, 20); l.setSpacing(6)
 
-        logo = _lbl("⬡  NetSentinel", 12, True, "#00ff88")
+        logo = _lbl("⬡  NetSentinel", 13, True, "#58a6ff")
         logo.setAlignment(Qt.AlignCenter)
-        logo.setStyleSheet("color:#00ff88;background:transparent;letter-spacing:2px;")
+        logo.setStyleSheet("color:#58a6ff;background:transparent;letter-spacing:2px;")
         l.addWidget(logo)
-        l.addWidget(_lbl("Traffic Analyzer  v1.0", 8, False, "#3d444d"))
-        l.addSpacing(16); l.addWidget(_sep()); l.addSpacing(8)
+        l.addWidget(_lbl("Traffic Analyzer  v1.0", 9, False, "#6e7681"))
+        l.addSpacing(18); l.addWidget(_sep()); l.addSpacing(10)
 
         self._navs = []
         for icon, text, idx in [("◉","Capture",0),("◈","Analysis",1),
@@ -186,7 +186,7 @@ class MainWindow(QMainWindow):
         self._navs[0].setChecked(True)
         l.addStretch()
         l.addWidget(_sep())
-        self._clock_lbl = _lbl("--:--:--", 9, False, "#3d444d")
+        self._clock_lbl = _lbl("--:--:--", 10, True, "#6e7681")
         self._clock_lbl.setAlignment(Qt.AlignCenter)
         l.addWidget(self._clock_lbl)
         return sb
@@ -198,30 +198,30 @@ class MainWindow(QMainWindow):
     # topbar
     def _topbar(self):
         bar = QFrame()
-        bar.setFixedHeight(54)
+        bar.setFixedHeight(58)
         bar.setStyleSheet("QFrame{background:#010409;border-bottom:1px solid #21262d;}")
         l = QHBoxLayout(bar)
-        l.setContentsMargins(18, 0, 18, 0); l.setSpacing(10)
+        l.setContentsMargins(20, 0, 20, 0); l.setSpacing(12)
 
-        l.addWidget(_lbl("LIVE CAPTURE", 10, True, "#4d9eff"))
+        l.addWidget(_lbl("LIVE CAPTURE", 11, True, "#58a6ff"))
         l.addStretch()
 
-        l.addWidget(_lbl("Filter:", 9, False, "#8b949e"))
+        l.addWidget(_lbl("Filter:", 10, False, "#a1abb5"))
         self.filter_combo = QComboBox()
         self.filter_combo.addItems([k for k in FILTER_PRESETS])
-        self.filter_combo.setFixedWidth(130)
+        self.filter_combo.setFixedWidth(140)
         self.filter_combo.currentTextChanged.connect(self._on_preset)
         l.addWidget(self.filter_combo)
 
         self.filter_input = QLineEdit()
         self.filter_input.setPlaceholderText("BPF:  tcp or udp  /  port 80 …")
-        self.filter_input.setFixedWidth(220)
+        self.filter_input.setFixedWidth(240)
         self.filter_input.setVisible(False)
         l.addWidget(self.filter_input)
 
-        l.addSpacing(8)
-        self.start_btn = self._abtn("▶  Start",  "#00ff88", "#003322")
-        self.stop_btn  = self._abtn("■  Stop",   "#ff4444", "#330000")
+        l.addSpacing(10)
+        self.start_btn = self._abtn("▶  Start",  "#3fb950", "#0b2a14")
+        self.stop_btn  = self._abtn("■  Stop",   "#f85149", "#2e0f0f")
         self.stop_btn.setEnabled(False)
         self.start_btn.clicked.connect(self.start_capture)
         self.stop_btn.clicked.connect(self.stop_capture)
@@ -231,12 +231,12 @@ class MainWindow(QMainWindow):
     def _abtn(self, text, fg, bg):
         b = QPushButton(text)
         b.setFont(QFont(UI_FONT, 10, QFont.Bold))
-        b.setFixedSize(106, 32)
+        b.setFixedSize(110, 34)
         b.setStyleSheet(f"""
             QPushButton{{background:{bg};color:{fg};
-                         border:1px solid {fg}55;border-radius:5px;}}
+                         border:1px solid {fg}66;border-radius:6px;}}
             QPushButton:hover{{background:{fg}22;border:1px solid {fg};}}
-            QPushButton:disabled{{background:#161b22;color:#3d444d;
+            QPushButton:disabled{{background:#161b22;color:#6e7681;
                                   border:1px solid #21262d;}}""")
         return b
 
@@ -246,16 +246,16 @@ class MainWindow(QMainWindow):
     # stat strip
     def _statstrip(self):
         strip = QFrame()
-        strip.setFixedHeight(100)
+        strip.setFixedHeight(106)
         strip.setStyleSheet("QFrame{background:#0d1117;border-bottom:1px solid #21262d;}")
         l = QHBoxLayout(strip)
-        l.setContentsMargins(18, 8, 18, 8); l.setSpacing(10)
-        self.c_total  = StatCard("TOTAL PACKETS",  "0",      "#00ff88")
-        self.c_ips    = StatCard("UNIQUE IPs",      "0",      "#4d9eff")
-        self.c_alerts = StatCard("ALERTS",          "0",      "#ff4444")
-        self.c_bw     = StatCard("AVG BANDWIDTH",   "0 B/s",  "#ffa500")
-        self.c_tcp    = StatCard("TCP",             "0",      "#a371f7")
-        self.c_udp    = StatCard("UDP",             "0",      "#39d353")
+        l.setContentsMargins(20, 10, 20, 10); l.setSpacing(12)
+        self.c_total  = StatCard("TOTAL PACKETS",  "0",      "#3fb950")
+        self.c_ips    = StatCard("UNIQUE IPs",      "0",      "#58a6ff")
+        self.c_alerts = StatCard("ALERTS",          "0",      "#f85149")
+        self.c_bw     = StatCard("AVG BANDWIDTH",   "0 B/s",  "#d29922")
+        self.c_tcp    = StatCard("TCP",             "0",      "#8957e5")
+        self.c_udp    = StatCard("UDP",             "0",      "#2ea043")
         for c in [self.c_total,self.c_ips,self.c_alerts,
                   self.c_bw,self.c_tcp,self.c_udp]: l.addWidget(c)
         return strip
@@ -263,17 +263,17 @@ class MainWindow(QMainWindow):
     # capture page
     def _page_capture(self):
         p = QWidget(); l = QVBoxLayout(p)
-        l.setContentsMargins(18, 14, 18, 14); l.setSpacing(10)
+        l.setContentsMargins(20, 16, 20, 16); l.setSpacing(12)
 
         hdr = QHBoxLayout()
-        hdr.addWidget(_lbl("Packet Stream", 11, True, "#8b949e"))
+        hdr.addWidget(_lbl("Packet Stream", 12, True, "#a1abb5"))
         hdr.addStretch()
         clr = QPushButton("Clear")
-        clr.setFont(QFont(UI_FONT, 8))
-        clr.setFixedSize(60, 24)
-        clr.setStyleSheet("QPushButton{background:transparent;color:#8b949e;"
-                          "border:1px solid #30363d;border-radius:4px;}"
-                          "QPushButton:hover{color:#ff4444;border-color:#ff4444;}")
+        clr.setFont(QFont(UI_FONT, 9, QFont.Bold))
+        clr.setFixedSize(68, 26)
+        clr.setStyleSheet("QPushButton{background:transparent;color:#a1abb5;"
+                          "border:1px solid #3d444d;border-radius:5px;}"
+                          "QPushButton:hover{color:#f85149;border-color:#f85149;background:#f8514911;}")
         clr.clicked.connect(self._clear)
         hdr.addWidget(clr)
         l.addLayout(hdr)
@@ -281,22 +281,22 @@ class MainWindow(QMainWindow):
         self.tbl = QTableWidget()
         self.tbl.setColumnCount(6)
         self.tbl.setHorizontalHeaderLabels(
-            ["TIME","SOURCE IP","DESTINATION IP","PROTOCOL","SRC PORT","DST PORT / LEN"])
+            ["TIME", "SOURCE IP", "DESTINATION IP", "PROTOCOL", "SRC PORT", "DST PORT / LEN"])
         self.tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.tbl.setAlternatingRowColors(True)
         self.tbl.setSelectionBehavior(QTableWidget.SelectRows)
         self.tbl.setEditTriggers(QTableWidget.NoEditTriggers)
         self.tbl.verticalHeader().setVisible(False)
         self.tbl.setShowGrid(False)
-        self.tbl.verticalHeader().setDefaultSectionSize(26)
+        self.tbl.verticalHeader().setDefaultSectionSize(28)
         self.tbl.cellClicked.connect(self._inspect)
         l.addWidget(self.tbl, 3)
 
-        l.addWidget(_lbl("Packet Inspector", 10, True, "#4d9eff"))
+        l.addWidget(_lbl("Packet Inspector", 11, True, "#58a6ff"))
         self.inspector = QTextEdit()
         self.inspector.setReadOnly(True)
-        self.inspector.setFont(QFont("Consolas", 10))
-        self.inspector.setFixedHeight(130)
+        self.inspector.setFont(QFont(DATA_FONT, 11))
+        self.inspector.setFixedHeight(150)
         self.inspector.setPlaceholderText("Click a row to inspect packet…")
         l.addWidget(self.inspector)
         return p
@@ -304,37 +304,37 @@ class MainWindow(QMainWindow):
     # analysis page
     def _page_analysis(self):
         p = QWidget(); l = QVBoxLayout(p)
-        l.setContentsMargins(18, 14, 18, 14); l.setSpacing(12)
-        l.addWidget(_lbl("Traffic Analysis", 11, True, "#8b949e"))
+        l.setContentsMargins(20, 16, 20, 16); l.setSpacing(14)
+        l.addWidget(_lbl("Traffic Analysis", 12, True, "#a1abb5"))
 
         btn_row = QHBoxLayout()
         for txt, fn in [("Top 10 IPs",self._ch_ips),("Top Ports",self._ch_ports),
                          ("Protocol Pie",self._ch_proto),("Timeline",self._ch_time)]:
             b = QPushButton(txt)
-            b.setFont(QFont(UI_FONT, 10)); b.setFixedHeight(32)
-            b.setStyleSheet("QPushButton{background:#161b22;color:#4d9eff;"
-                            "border:1px solid #30363d;border-radius:4px;}"
-                            "QPushButton:hover{background:#1f6feb22;border-color:#4d9eff;}")
+            b.setFont(QFont(UI_FONT, 11)); b.setFixedHeight(34)
+            b.setStyleSheet("QPushButton{background:#161b22;color:#58a6ff;"
+                            "border:1px solid #3d444d;border-radius:5px;}"
+                            "QPushButton:hover{background:#1f6feb22;border-color:#58a6ff;}")
             b.clicked.connect(fn); btn_row.addWidget(b)
         l.addLayout(btn_row)
 
-        split = QHBoxLayout(); split.setSpacing(14)
+        split = QHBoxLayout(); split.setSpacing(16)
         lv = QVBoxLayout()
-        lv.addWidget(_lbl("Top Source IPs", 10, False, "#4d9eff"))
+        lv.addWidget(_lbl("Top Source IPs", 11, False, "#58a6ff"))
         self.tbl_ips = self._mini(["IP Address","Packets"])
         lv.addWidget(self.tbl_ips)
         rv = QVBoxLayout()
-        rv.addWidget(_lbl("Top Ports", 10, False, "#a371f7"))
+        rv.addWidget(_lbl("Top Ports", 11, False, "#8957e5"))
         self.tbl_ports = self._mini(["Port","Packets"])
         rv.addWidget(self.tbl_ports)
         split.addLayout(lv); split.addLayout(rv)
         l.addLayout(split, 1)
 
         ref = QPushButton("⟳  Refresh Tables")
-        ref.setFont(QFont(UI_FONT, 9)); ref.setFixedHeight(28)
-        ref.setStyleSheet("QPushButton{background:transparent;color:#39d353;"
-                          "border:1px solid #39d35344;border-radius:4px;}"
-                          "QPushButton:hover{border-color:#39d353;background:#39d35311;}")
+        ref.setFont(QFont(UI_FONT, 10, QFont.Bold)); ref.setFixedHeight(30)
+        ref.setStyleSheet("QPushButton{background:transparent;color:#3fb950;"
+                          "border:1px solid #3fb95055;border-radius:5px;}"
+                          "QPushButton:hover{border-color:#3fb950;background:#3fb95011;}")
         ref.clicked.connect(self._refresh)
         l.addWidget(ref)
         return p
@@ -348,40 +348,41 @@ class MainWindow(QMainWindow):
         t.setSelectionBehavior(QTableWidget.SelectRows)
         t.verticalHeader().setVisible(False)
         t.setShowGrid(False)
-        t.verticalHeader().setDefaultSectionSize(22)
+        t.verticalHeader().setDefaultSectionSize(26)
         return t
 
     # alerts page
     def _page_alerts(self):
         p = QWidget(); l = QVBoxLayout(p)
-        l.setContentsMargins(18, 14, 18, 14); l.setSpacing(10)
+        l.setContentsMargins(20, 16, 20, 16); l.setSpacing(12)
 
         hdr = QHBoxLayout()
-        hdr.addWidget(_lbl("Security Alerts", 11, True, "#8b949e"))
+        hdr.addWidget(_lbl("Security Alerts", 12, True, "#a1abb5"))
         hdr.addStretch()
         clr = QPushButton("Clear Alerts")
-        clr.setFont(QFont(UI_FONT, 9)); clr.setFixedSize(96, 26)
-        clr.setStyleSheet("QPushButton{background:transparent;color:#ff4444;"
-                          "border:1px solid #ff444444;border-radius:4px;}"
-                          "QPushButton:hover{border-color:#ff4444;background:#ff444411;}")
+        clr.setFont(QFont(UI_FONT, 10)); clr.setFixedSize(106, 28)
+        clr.setStyleSheet("QPushButton{background:transparent;color:#f85149;"
+                          "border:1px solid #f8514955;border-radius:5px;}"
+                          "QPushButton:hover{border-color:#f85149;background:#f8514911;}")
         clr.clicked.connect(self._clear_alerts)
         hdr.addWidget(clr); l.addLayout(hdr)
 
         scroll = QScrollArea(); scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea{border:1px solid #30363d;border-radius:5px;}")
+        scroll.setStyleSheet("QScrollArea{border:1px solid #3d444d;border-radius:6px; background:#161b22;}")
         self.alerts_box = QWidget()
+        self.alerts_box.setStyleSheet("background:transparent;")
         self.alerts_lay = QVBoxLayout(self.alerts_box)
-        self.alerts_lay.setContentsMargins(8,8,8,8); self.alerts_lay.setSpacing(4)
+        self.alerts_lay.setContentsMargins(10,10,10,10); self.alerts_lay.setSpacing(6)
         self.alerts_lay.addStretch()
         scroll.setWidget(self.alerts_box); l.addWidget(scroll)
 
         thr = QHBoxLayout()
-        thr.addWidget(_lbl("Anomaly threshold (pkts/IP):", 9, False, "#8b949e"))
-        self.thr_input = QLineEdit("300"); self.thr_input.setFixedWidth(72)
-        ok = QPushButton("Apply"); ok.setFont(QFont(UI_FONT,9)); ok.setFixedSize(64,24)
-        ok.setStyleSheet("QPushButton{background:#003322;color:#00ff88;"
-                         "border:1px solid #00ff8844;border-radius:4px;}"
-                         "QPushButton:hover{border-color:#00ff88;}")
+        thr.addWidget(_lbl("Anomaly threshold (pkts/IP):", 10, False, "#a1abb5"))
+        self.thr_input = QLineEdit("300"); self.thr_input.setFixedWidth(80)
+        ok = QPushButton("Apply"); ok.setFont(QFont(UI_FONT,10)); ok.setFixedSize(70,28)
+        ok.setStyleSheet("QPushButton{background:#0b2a14;color:#3fb950;"
+                         "border:1px solid #3fb95055;border-radius:5px;}"
+                         "QPushButton:hover{border-color:#3fb950;}")
         ok.clicked.connect(self._apply_thr)
         thr.addWidget(self.thr_input); thr.addWidget(ok); thr.addStretch()
         l.addLayout(thr)
@@ -390,40 +391,40 @@ class MainWindow(QMainWindow):
     # export page
     def _page_export(self):
         p = QWidget(); l = QVBoxLayout(p)
-        l.setContentsMargins(18, 14, 18, 14); l.setSpacing(14)
-        l.addWidget(_lbl("Data Export", 11, True, "#8b949e"))
-        l.addWidget(_lbl("Save captured packets and statistics to CSV or Excel.", 9, False, "#4d9eff"))
+        l.setContentsMargins(20, 16, 20, 16); l.setSpacing(16)
+        l.addWidget(_lbl("Data Export", 12, True, "#a1abb5"))
+        l.addWidget(_lbl("Save captured packets and statistics to CSV or Excel.", 10, False, "#58a6ff"))
         l.addWidget(_sep())
 
         for txt, fn, col in [
-            ("⤓  Export Packets → CSV",    self._exp_csv,   "#00ff88"),
-            ("⤓  Export Packets → Excel",  self._exp_excel, "#39d353"),
-            ("⤓  Export Statistics → CSV", self._exp_stats, "#4d9eff"),
+            ("⤓  Export Packets → CSV",    self._exp_csv,   "#3fb950"),
+            ("⤓  Export Packets → Excel",  self._exp_excel, "#2ea043"),
+            ("⤓  Export Statistics → CSV", self._exp_stats, "#58a6ff"),
         ]:
-            b = QPushButton(txt); b.setFont(QFont(UI_FONT,11)); b.setFixedHeight(42)
+            b = QPushButton(txt); b.setFont(QFont(UI_FONT,12, QFont.Bold)); b.setFixedHeight(46)
             b.setStyleSheet(f"QPushButton{{background:{col}11;color:{col};"
-                            f"border:1px solid {col}44;border-radius:5px;"
-                            f"text-align:left;padding-left:18px;}}"
+                            f"border:1px solid {col}55;border-radius:6px;"
+                            f"text-align:left;padding-left:20px;}}"
                             f"QPushButton:hover{{background:{col}22;border:1px solid {col};}}")
             b.clicked.connect(fn); l.addWidget(b)
 
         l.addStretch()
         self.exp_log = QTextEdit(); self.exp_log.setReadOnly(True)
-        self.exp_log.setFixedHeight(90); self.exp_log.setFont(QFont("Consolas",9))
+        self.exp_log.setFixedHeight(100); self.exp_log.setFont(QFont(DATA_FONT,10))
         self.exp_log.setPlaceholderText("Export log…")
         l.addWidget(self.exp_log)
         return p
 
     # statusbar
     def _statusbar(self):
-        bar = QFrame(); bar.setFixedHeight(28)
+        bar = QFrame(); bar.setFixedHeight(30)
         bar.setStyleSheet("QFrame{background:#010409;border-top:1px solid #21262d;}")
-        l = QHBoxLayout(bar); l.setContentsMargins(14,0,14,0)
-        self.st_lbl = _lbl("●  Idle", 9, False, "#4d9eff"); l.addWidget(self.st_lbl)
+        l = QHBoxLayout(bar); l.setContentsMargins(16,0,16,0)
+        self.st_lbl = _lbl("●  Idle", 10, False, "#58a6ff"); l.addWidget(self.st_lbl)
         l.addStretch()
-        self.rate_lbl  = _lbl("0 pkt/s",         9, False, "#8b949e"); l.addWidget(self.rate_lbl)
-        l.addSpacing(16)
-        self.total_lbl = _lbl("0 packets total", 9, False, "#8b949e"); l.addWidget(self.total_lbl)
+        self.rate_lbl  = _lbl("0 pkt/s",         10, False, "#a1abb5"); l.addWidget(self.rate_lbl)
+        l.addSpacing(18)
+        self.total_lbl = _lbl("0 packets total", 10, False, "#a1abb5"); l.addWidget(self.total_lbl)
         return bar
 
     # ── Capture control ──────────────────────────────────────
@@ -445,14 +446,14 @@ class MainWindow(QMainWindow):
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         self.st_lbl.setText("●  Capturing…")
-        self.st_lbl.setStyleSheet("color:#00ff88;background:transparent;font-size:9pt;")
+        self.st_lbl.setStyleSheet("color:#3fb950;background:transparent;font-size:10pt;")
 
     def stop_capture(self):
         self.capture.stop()
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.st_lbl.setText("●  Stopped")
-        self.st_lbl.setStyleSheet("color:#ff4444;background:transparent;font-size:9pt;")
+        self.st_lbl.setStyleSheet("color:#f85149;background:transparent;font-size:10pt;")
 
     # ── Packet pipeline ──────────────────────────────────────
     def _raw_callback(self, packet):
@@ -494,28 +495,29 @@ class MainWindow(QMainWindow):
     def _on_alert(self, msg):
         self.alerts.append(msg)
         self.c_alerts.set(len(self.alerts))
-        colors = {"⚠": "#ffa500", "🔴": "#ff4444"}
-        color  = colors.get(msg[0], "#ffa500")
+        colors = {"⚠": "#d29922", "🔴": "#f85149"}
+        color  = colors.get(msg[0], "#d29922")
         ts     = datetime.now().strftime("%H:%M:%S")
         row    = QFrame()
-        row.setStyleSheet(f"QFrame{{background:#161b22;border-left:3px solid {color};"
-                          "border-radius:3px;margin:1px 0;}}")
-        rl = QHBoxLayout(row); rl.setContentsMargins(8,5,8,5)
-        rl.addWidget(_lbl(ts,  8, False, "#8b949e"))
-        rl.addWidget(_lbl(msg, 8, False, color), 1)
+        row.setStyleSheet(f"QFrame{{background:#0d1117;border-left:4px solid {color};"
+                          "border-radius:4px;margin:2px 0; border: 1px solid #21262d; border-left-width: 4px;}}")
+        rl = QHBoxLayout(row); rl.setContentsMargins(10,8,10,8)
+        rl.addWidget(_lbl(ts,  10, False, "#a1abb5"))
+        rl.addWidget(_lbl(msg, 10, True, color), 1)
         self.alerts_lay.insertWidget(self.alerts_lay.count()-1, row)
 
     def _add_row(self, p):
-        PC = {"TCP": "#a371f7", "UDP": "#39d353", "OTHER": "#ffa500"}
+        PC = {"TCP": "#58a6ff", "UDP": "#3fb950", "OTHER": "#f0883e"}
         row = self.tbl.rowCount()
         self.tbl.insertRow(row)
         vals = [p["time"], p["src_ip"], p["dst_ip"], p["protocol"],
                 str(p["src_port"]), f'{p["dst_port"]} / {p["length"]}B']
         for col, v in enumerate(vals):
             item = QTableWidgetItem(v)
-            item.setFont(QFont("Consolas", 10))
+            item.setFont(QFont(DATA_FONT, 11))
             if col == 3:
-                item.setForeground(QColor(PC.get(v, "#c9d1d9")))
+                item.setForeground(QColor(PC.get(v, "#e6edf3")))
+                item.setFont(QFont(DATA_FONT, 11, QFont.Bold))
             self.tbl.setItem(row, col, item)
         if row > 300:
             self.tbl.scrollToBottom()
@@ -525,20 +527,20 @@ class MainWindow(QMainWindow):
         if row >= len(self.packets): return
         p = self.packets[row]
         self.inspector.setHtml(f"""
-<pre style="color:#c9d1d9;font-family:Consolas;font-size:10pt;line-height:1.7;">
-<span style="color:#4d9eff">═══ PACKET #{row+1} ══════════════════════</span>
+<div style="font-family:Consolas, monospace; font-size:11pt; line-height:1.8; color:#e6edf3; padding: 4px;">
+  <span style="color:#58a6ff; font-weight:bold;">═══ PACKET #{row+1} ═══════════════════════════════</span><br><br>
 
-  <span style="color:#8b949e">Time:</span>              <span style="color:#00ff88">{p['time']}</span>
-  <span style="color:#8b949e">Protocol:</span>          <span style="color:#a371f7">{p['protocol']}</span>
+  <span style="color:#a1abb5; display:inline-block; width:150px;">Time:</span>              <span style="color:#3fb950; font-weight:bold;">{p['time']}</span><br>
+  <span style="color:#a1abb5; display:inline-block; width:150px;">Protocol:</span>          <span style="color:#8957e5; font-weight:bold;">{p['protocol']}</span><br><br>
 
-  <span style="color:#8b949e">Source IP:</span>         <span style="color:#ffa500">{p['src_ip']}</span>
-  <span style="color:#8b949e">Destination IP:</span>    <span style="color:#ffa500">{p['dst_ip']}</span>
+  <span style="color:#a1abb5; display:inline-block; width:150px;">Source IP:</span>         <span style="color:#f0883e; font-weight:bold;">{p['src_ip']}</span><br>
+  <span style="color:#a1abb5; display:inline-block; width:150px;">Destination IP:</span>    <span style="color:#f0883e; font-weight:bold;">{p['dst_ip']}</span><br><br>
 
-  <span style="color:#8b949e">Source Port:</span>       <span style="color:#c9d1d9">{p['src_port']}</span>
-  <span style="color:#8b949e">Destination Port:</span>  <span style="color:#c9d1d9">{p['dst_port']}</span>
+  <span style="color:#a1abb5; display:inline-block; width:150px;">Source Port:</span>       <span style="color:#e6edf3; font-weight:bold;">{p['src_port']}</span><br>
+  <span style="color:#a1abb5; display:inline-block; width:150px;">Destination Port:</span>  <span style="color:#e6edf3; font-weight:bold;">{p['dst_port']}</span><br><br>
 
-  <span style="color:#8b949e">Length:</span>            <span style="color:#39d353">{p['length']} bytes</span>
-</pre>""")
+  <span style="color:#a1abb5; display:inline-block; width:150px;">Length:</span>            <span style="color:#3fb950; font-weight:bold;">{p['length']} bytes</span>
+</div>""")
 
     # ── Analysis ─────────────────────────────────────────────
     def _refresh(self):
@@ -620,7 +622,7 @@ class MainWindow(QMainWindow):
         dlg.setIcon(QMessageBox.Warning)
         dlg.setStyleSheet("""
             QMessageBox{background:#161b22;}
-            QLabel{color:#c9d1d9;font-family:Consolas;font-size:10pt;}
-            QPushButton{background:#21262d;color:#c9d1d9;
-                        border:1px solid #30363d;border-radius:4px;padding:5px 14px;}""")
+            QLabel{color:#e6edf3;font-family:Consolas, monospace;font-size:11pt;}
+            QPushButton{background:#21262d;color:#e6edf3;
+                        border:1px solid #3d444d;border-radius:5px;padding:6px 16px;}""")
         dlg.exec_()
