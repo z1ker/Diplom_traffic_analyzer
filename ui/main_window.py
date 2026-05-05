@@ -16,7 +16,7 @@ from analysis.traffic_analyzer import TrafficAnalyzer
 from analysis.anomaly_detector import AnomalyDetector
 from storage.data_export import DataExporter
 from visualization.charts import plot_top_ips, plot_top_ports, plot_protocol_pie, plot_traffic_timeline
-
+from analysis.app_analyzer import AppAnalyzer
 
 # ── Signal bridge (safe cross-thread UI updates) ─────────────
 class SignalBridge(QObject):
@@ -124,6 +124,7 @@ class MainWindow(QMainWindow):
         self._pkt_t     = time.time()
 
         self.analyzer = TrafficAnalyzer()
+        self.app_analyzer = AppAnalyzer()
         self.detector = AnomalyDetector()
         self.capture  = PacketCapture(self._raw_callback)
 
@@ -157,6 +158,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self._page_analysis())  # 1
         self.stack.addWidget(self._page_alerts())    # 2
         self.stack.addWidget(self._page_export())    # 3
+        self.stack.addWidget(self._page_apps())      # 4
         ml.addWidget(self.stack, 1)
         ml.addWidget(self._statusbar())
         rl.addWidget(main, 1)
@@ -177,8 +179,9 @@ class MainWindow(QMainWindow):
         l.addSpacing(18); l.addWidget(_sep()); l.addSpacing(10)
 
         self._navs = []
-        for icon, text, idx in [("◉","Capture",0),("◈","Analysis",1),
-                                  ("⚑","Alerts",2),("⤓","Export",3)]:
+        for icon, text, idx in [("◉", "Capture", 0), ("◈", "Analysis", 1),
+                                ("⚑", "Alerts", 2), ("⤓", "Export", 3),
+                                ("◫", "Applications", 4)]:
             b = NavBtn(icon, text)
             b.clicked.connect(lambda _, i=idx: self._nav(i))
             self._navs.append(b); l.addWidget(b)
@@ -194,6 +197,10 @@ class MainWindow(QMainWindow):
     def _nav(self, idx):
         self.stack.setCurrentIndex(idx)
         for i, b in enumerate(self._navs): b.setChecked(i == idx)
+
+
+        if idx == 4:
+            self._refresh_apps()
 
     # topbar
     def _topbar(self):
@@ -467,6 +474,7 @@ class MainWindow(QMainWindow):
 
         try:
             self.analyzer.analyze(packet)
+            self.app_analyzer.process_packet(packet)
             alert = self.detector.check(packet)
         except Exception:
             alert = None
@@ -491,6 +499,8 @@ class MainWindow(QMainWindow):
         self.c_tcp.set(sum(1 for p in self.packets if p["protocol"] == "TCP"))
         self.c_udp.set(sum(1 for p in self.packets if p["protocol"] == "UDP"))
         self.total_lbl.setText(f"{n} packets total")
+        if self.stack.currentIndex() == 4 and n % 30 == 0:
+            self._refresh_apps()
 
     def _on_alert(self, msg):
         self.alerts.append(msg)
@@ -600,6 +610,7 @@ class MainWindow(QMainWindow):
     def _clear(self):
         self.packets.clear(); self.tbl.setRowCount(0); self.inspector.clear()
         self.c_total.set(0); self.c_tcp.set(0); self.c_udp.set(0)
+        self.app_analyzer.reset()
 
     def _tick(self):
         self._clock_lbl.setText(time.strftime("%H:%M:%S"))
@@ -626,3 +637,143 @@ class MainWindow(QMainWindow):
             QPushButton{background:#21262d;color:#e6edf3;
                         border:1px solid #3d444d;border-radius:5px;padding:6px 16px;}""")
         dlg.exec_()
+
+        # ------------------------- App analyze
+    def _page_apps(self):
+        """Applications page — like Wireshark's 'Statistics → Endpoints'."""
+        p = QWidget()
+        l = QVBoxLayout(p)
+        l.setContentsMargins(20, 16, 20, 16)
+        l.setSpacing(12)
+
+        # ── Header ───────────────────────────────────────────────
+        hdr = QHBoxLayout()
+        hdr.addWidget(_lbl("Applications", 12, True, "#a1abb5"))
+        hdr.addStretch()
+
+        ref_btn = QPushButton("⟳  Refresh")
+        ref_btn.setFont(QFont(UI_FONT, 10, QFont.Bold))
+        ref_btn.setFixedSize(100, 28)
+        ref_btn.setStyleSheet(
+            "QPushButton{background:transparent;color:#3fb950;"
+            "border:1px solid #3fb95055;border-radius:5px;}"
+            "QPushButton:hover{border-color:#3fb950;background:#3fb95011;}"
+        )
+        ref_btn.clicked.connect(self._refresh_apps)
+        hdr.addWidget(ref_btn)
+        l.addLayout(hdr)
+
+        l.addWidget(_lbl(
+            "Traffic breakdown by application / process  (auto-refreshes every 2 s while capturing)",
+            10, False, "#58a6ff"
+        ))
+
+        # ── Table ────────────────────────────────────────────────
+        cols = ["APPLICATION", "PACKETS", "TRAFFIC", "CONNECTIONS", "PROTOCOLS"]
+        self.tbl_apps = QTableWidget()
+        self.tbl_apps.setColumnCount(len(cols))
+        self.tbl_apps.setHorizontalHeaderLabels(cols)
+        self.tbl_apps.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.tbl_apps.setAlternatingRowColors(True)
+        self.tbl_apps.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.tbl_apps.setSelectionBehavior(QTableWidget.SelectRows)
+        self.tbl_apps.verticalHeader().setVisible(False)
+        self.tbl_apps.setShowGrid(False)
+        self.tbl_apps.verticalHeader().setDefaultSectionSize(30)
+
+        # Сортировка по клику на заголовок
+        self.tbl_apps.horizontalHeader().sectionClicked.connect(
+            self._sort_apps
+        )
+        self._apps_sort_col = 1  # по умолчанию — по пакетам
+        self._apps_sort_asc = False
+
+        l.addWidget(self.tbl_apps, 1)
+
+        # ── Legend ───────────────────────────────────────────────
+        leg = QHBoxLayout()
+        for color, label in [
+            ("#f85149", "High  > 1 MB"),
+            ("#d29922", "Medium  > 100 KB"),
+            ("#3fb950", "Low  ≤ 100 KB"),
+        ]:
+            dot = QLabel("●")
+            dot.setStyleSheet(f"color:{color};background:transparent;font-size:14px;")
+            leg.addWidget(dot)
+            leg.addWidget(_lbl(label, 9, False, "#a1abb5"))
+            leg.addSpacing(16)
+        leg.addStretch()
+        l.addLayout(leg)
+
+        # ── Auto-refresh timer ───────────────────────────────────
+        self._app_timer = QTimer()
+        self._app_timer.timeout.connect(self._refresh_apps)
+        self._app_timer.start(2000)  # каждые 2 секунды
+
+        return p
+
+    # ── Apps helpers ─────────────────────────────────────────────
+
+    def _refresh_apps(self):
+        """Populate / update the applications table."""
+        summary = self.app_analyzer.get_summary()
+        self.tbl_apps.setRowCount(0)
+
+        for row_data in summary:
+            row = self.tbl_apps.rowCount()
+            self.tbl_apps.insertRow(row)
+
+            mb = row_data["mb"]
+            pkts = row_data["packets"]
+            conns = row_data["connections"]
+            proto = row_data["protocols"]
+            app = row_data["application"]
+
+            # Форматируем трафик
+            b = row_data["bytes"]
+            if b >= 1_048_576:
+                traffic_str = f"{b / 1_048_576:.2f} MB"
+            elif b >= 1024:
+                traffic_str = f"{b / 1024:.1f} KB"
+            else:
+                traffic_str = f"{b} B"
+
+            if mb > 1:
+                row_color = QColor("#3a1a1a")  # red
+                txt_color = "#f85149"
+            elif mb > 0.1:
+                row_color = QColor("#2a2200")  # yellow
+                txt_color = "#d29922"
+            else:
+                row_color = QColor("#0d1f12")  # green
+                txt_color = "#3fb950"
+
+            values = [app, str(pkts), traffic_str, str(conns), proto]
+
+            for col, val in enumerate(values):
+                item = QTableWidgetItem(val)
+                item.setFont(QFont(DATA_FONT, 11))
+                item.setBackground(row_color)
+
+                # Имя приложения — выделяем ярче
+                if col == 0:
+                    item.setForeground(QColor("#e6edf3"))
+                    item.setFont(QFont(DATA_FONT, 11, QFont.Bold))
+                elif col == 2:
+                    item.setForeground(QColor(txt_color))
+                    item.setFont(QFont(DATA_FONT, 11, QFont.Bold))
+                else:
+                    item.setForeground(QColor("#a1abb5"))
+
+                self.tbl_apps.setItem(row, col, item)
+
+    def _sort_apps(self, col: int):
+        """Toggle sort direction when header clicked."""
+        if self._apps_sort_col == col:
+            self._apps_sort_asc = not self._apps_sort_asc
+        else:
+            self._apps_sort_col = col
+            self._apps_sort_asc = False
+
+        order = Qt.AscendingOrder if self._apps_sort_asc else Qt.DescendingOrder
+        self.tbl_apps.sortItems(col, order)
