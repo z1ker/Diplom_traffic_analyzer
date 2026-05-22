@@ -14,17 +14,6 @@ from scapy.error import Scapy_Exception
 
 
 class CaptureWorker(QThread):
-    """
-    Runs scapy's blocking sniff() in a dedicated QThread.
-
-    Signals
-    -------
-    packet_ready(dict)
-        Emitted for every captured IP packet.  Dict keys:
-        src_ip, dst_ip, protocol, src_port, dst_port, length, payload (bytes).
-    error_occurred(str)
-        Emitted on PermissionError / bad BPF filter / any other exception.
-    """
 
     packet_ready  = pyqtSignal(dict)
     error_occurred = pyqtSignal(str)

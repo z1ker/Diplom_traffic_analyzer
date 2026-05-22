@@ -103,7 +103,6 @@ class DPIWorker(QThread):
         Blocks on the queue, processes packets, emits results.
         """
         while True:
-            # Block with a short timeout so we stay responsive to _STOP
             try:
                 item = self._queue.get(timeout=0.15)
             except Empty:
@@ -113,15 +112,14 @@ class DPIWorker(QThread):
                 break
 
             packet, pkt_index = item
-
-            # Pop payload so it isn't serialised back through the signal
             payload: bytes = packet.pop("payload", b"")
 
             try:
                 result: DPIResult = self.engine.inspect(packet, payload, pkt_index)
-                # Only emit when there is something meaningful to display
-                if result.severity != SEVERITY_NONE:
-                    self.result_ready.emit(pkt_index, result.to_dict())
+
+                # ВИПРАВЛЕНО: Завжди відправляємо результат в UI,
+                # щоб безпечні UNKNOWN пакети теж відображались, а не висіли як "..."
+                self.result_ready.emit(pkt_index, result.to_dict())
+
             except Exception:
-                # Never crash the worker thread
                 pass
