@@ -1,67 +1,111 @@
+"""
+analysis/anomaly_detector.py
+=============================
+Детектор аномалій із двома незалежними механізмами:
+
+1. Volume detector  — спрацьовує коли кількість пакетів від одного IP
+                      перевищує поріг (threshold). Алерт — рівно один раз
+                      на кожен кратний поріг (300, 600, 900…).
+
+2. Shannon entropy   — аналізує останні window_size пакетів.
+                       Якщо ентропія падає нижче entropy_threshold —
+                       трафік домінується 1-2 IP → підозра на flood.
+                       Cooldown між ентропійними алертами = cooldown_pkts,
+                       щоб не спамити UI.
+
+Виправлення відносно попередньої версії:
+  - _packet_counter починався з 0, тому 0 % 50 == 0 спрацьовував одразу
+    до заповнення вікна → алерт ніколи не видавався коректно.
+  - Cooldown тепер відраховується від останнього ВИДАНОГО алерту,
+    а не від глобального лічильника пакетів.
+  - Вікно зменшено до 50 пакетів (швидше реагує на короткі флади).
+  - Додано reset() для скидання стану при очищенні стріму.
+"""
+
 import math
 from collections import deque, Counter
 
 
 class AnomalyDetector:
+
     def __init__(self):
-        # 1. Классический детектор по объему
-        self.ip_activity = Counter()
-        self.threshold = 300
+        # ── Volume detector ───────────────────────────────────
+        self.ip_activity: Counter = Counter()
+        self.threshold: int       = 300   # пакетів від одного IP
 
-        # 2. Детектор на основе энтропии Шеннона
-        self.window_size = 100  # Анализируем скользящее окно из 100 последних пакетов
-        self.packet_window = deque(maxlen=self.window_size)
-        self.entropy_threshold = 1.0  # Порог аномалии (ниже 1.0 = доминация 1-2 IP)
-        self._packet_counter = 0  # Для ограничения спама алертами
+        # ── Shannon entropy detector ──────────────────────────
+        self.window_size:        int   = 50    # розмір ковзного вікна
+        self.entropy_threshold:  float = 1.5   # нижче = підозрілий трафік
+        self.cooldown_pkts:      int   = 25    # мін. пакетів між ентропійними алертами
 
-    def calculate_entropy(self):
-        """Вычисляет энтропию Шеннона для IP-адресов в текущем окне."""
-        # Если окно еще не заполнилось - статистику считать рано
-        if len(self.packet_window) < self.window_size:
-            return None
+        self._packet_window: deque = deque(maxlen=self.window_size)
+        self._total_packets: int   = 0         # загальний лічильник (без reset-багу)
+        self._last_entropy_alert_at: int = -999  # пакет, на якому був останній алерт
 
-        ip_counts = Counter(self.packet_window)
-        entropy = 0.0
+    # ── Public API ────────────────────────────────────────────
 
-        # Формула Шеннона: H(X) = - Σ ( P(x) * log2(P(x)) )
-        for count in ip_counts.values():
-            probability = count / self.window_size
-            entropy -= probability * math.log2(probability)
-
-        return entropy
-
-    def check(self, packet):
-        """Проверяет пакет на аномалии и возвращает строку с предупреждением."""
+    def check(self, packet: dict) -> str | None:
+        """
+        Перевіряє пакет на аномалії.
+        Повертає рядок-попередження або None.
+        """
         ip = packet.get("src_ip")
         if not ip:
             return None
 
-        self._packet_counter += 1
-        alert = None
+        self._total_packets += 1
+        alerts = []
 
-        # --- Логика 1: Проверка по количеству пакетов ---
+        # ── 1. Volume check ───────────────────────────────────
         self.ip_activity[ip] += 1
+        cnt = self.ip_activity[ip]
 
-        # Срабатываем ровно тогда, когда достигнут порог (чтобы не спамить UI каждый раз)
-        if self.ip_activity[ip] == self.threshold:
-            alert = f"🔴 High traffic volume from {ip} (reached {self.threshold} pkts)"
+        # Алерт на кожен кратний поріг: 300, 600, 900…
+        if cnt % self.threshold == 0:
+            alerts.append(
+                f"🔴 High volume from {ip}  ({cnt} packets)"
+            )
 
-        # --- Логика 2: Вычисление энтропии ---
-        self.packet_window.append(ip)
-        entropy = self.calculate_entropy()
+        # ── 2. Entropy check ──────────────────────────────────
+        self._packet_window.append(ip)
 
-        if entropy is not None:
-            # Если энтропия упала ниже 1.0, значит ~90% трафика идет от 1-2 IP
-            if entropy < self.entropy_threshold:
-                # Выдаем предупреждение раз в половину окна, чтобы интерфейс не завис от спама
-                if self._packet_counter % (self.window_size // 2) == 0:
-                    entropy_msg = f"⚠ Low Entropy ({entropy:.2f}): Possible Network Flood"
-                    return f"{alert} | {entropy_msg}" if alert else entropy_msg
+        # Рахуємо ентропію тільки коли вікно повністю заповнене
+        if len(self._packet_window) == self.window_size:
+            entropy = self._shannon_entropy(self._packet_window)
 
-        return alert
+            # Cooldown: видаємо алерт не частіше ніж раз на cooldown_pkts пакетів
+            pkts_since_last = self._total_packets - self._last_entropy_alert_at
+            if entropy < self.entropy_threshold and pkts_since_last >= self.cooldown_pkts:
+                self._last_entropy_alert_at = self._total_packets
+                # Визначаємо домінуючий IP для детального повідомлення
+                top_ip, top_cnt = Counter(self._packet_window).most_common(1)[0]
+                pct = round(top_cnt / self.window_size * 100)
+                alerts.append(
+                    f"⚠ Low entropy ({entropy:.2f}) — "
+                    f"{top_ip} = {pct}% of last {self.window_size} packets "
+                    f"(possible flood)"
+                )
+
+        if not alerts:
+            return None
+        return "  |  ".join(alerts)
 
     def reset(self):
-        """Очистка истории (полезно при сбросе стрима захвата)."""
+        """Скидає весь стан (викликається при Clear Stream)."""
         self.ip_activity.clear()
-        self.packet_window.clear()
-        self._packet_counter = 0
+        self._packet_window.clear()
+        self._total_packets          = 0
+        self._last_entropy_alert_at  = -999
+
+    # ── Internal ──────────────────────────────────────────────
+
+    @staticmethod
+    def _shannon_entropy(window: deque) -> float:
+        """H(X) = -Σ p(x) * log2(p(x))"""
+        n      = len(window)
+        counts = Counter(window)
+        h      = 0.0
+        for c in counts.values():
+            p  = c / n
+            h -= p * math.log2(p)
+        return h
