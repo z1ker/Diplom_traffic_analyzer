@@ -194,7 +194,7 @@ class MainWindow(QMainWindow):
         self.resize(1380, 840)
         self.setMinimumSize(1080, 660)
         self.setStyleSheet(self.STYLE)
-
+        self._bw_window: list[tuple[float, int]] = []
         self.packets: list[dict]          = []
         self.alerts:  list[str]           = []
         self.dpi_results: dict[int, dict] = {}
@@ -907,7 +907,7 @@ class MainWindow(QMainWindow):
             packet["time"] = ts
 
             self._bytes += packet.get("length", 0)
-
+            self._bw_window.append((time.time(), packet.get("length", 0)))
             # O(1) лічильники
             proto = packet.get("protocol", "OTHER")
             if proto == "TCP":
@@ -1270,14 +1270,15 @@ class MainWindow(QMainWindow):
 
     def _tick(self):
         self._clock_lbl.setText(time.strftime("%H:%M:%S"))
+        now = time.time()
         elapsed = time.time() - self._start_ts if self._start_ts else 1
         bw = self._bytes / max(elapsed, 1)
-        bw_str = (f"{bw/1_000_000:.1f} MB/s" if bw >= 1_000_000 else
-                  f"{bw/1000:.1f} KB/s"       if bw >= 1000      else
+        bw_str = (f"{bw / 1_000_000:.1f} MB/s" if bw >= 1_000_000 else
+                  f"{bw / 1000:.1f} KB/s" if bw >= 1000 else
                   f"{int(bw)} B/s")
         self.c_bw.set_value(bw_str)
 
-        now = time.time(); n = len(self.packets); dt = now - self._pkt_t
+        n = len(self.packets); dt = now - self._pkt_t
         if dt >= 1.0:
             self.rate_lbl.setText(f"{(n - self._pkt_last)/dt:.0f} pkt/s")
             self._pkt_last = n; self._pkt_t = now
